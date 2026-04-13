@@ -1,0 +1,108 @@
+:root {
+  --bg: #f7f7f7;
+  --panel: #fbfbfb;
+  --canvas: #f7f8fb;
+  --border: #eceef1;
+  --text: #767c86;
+  --heading: #20242c;
+  --surface: #ffffff;
+  --surface-hover: #eef0f4;
+  --surface-active: #e4e8ef;
+  --text-dark: #3a3f47;
+  --text-muted: #9398a3;
+  --text-secondary: #55606f;
+  --primary: #203d63;
+  --primary-hover: #264a75;
+  --primary-light: #3b6cb5;
+  --input-bg: #fafbfc;
+  --input-border: #e0e3e8;
+  --placeholder: #babfc7;
+  --danger: #e07168;
+  --danger-bg: #fdf4f3;
+  --danger-border: #f5dfdd;
+  --error: #c04040;
+  --scrollbar: #d4d6db;
+  --chip-border: #ebedf0;
+  --chip-text: #666c76;
+  --bubble-bot-bg: #ffffff;
+  --bubble-bot-text: #3a3f47;
+  --bubble-bot-border: #eceef1;
+  --banner-bg: #f4f7fb;
+  --auth-gradient-start: #f0f2f6;
+  --auth-gradient-mid: #e4e8f0;
+  --auth-gradient-end: #d6dce8;
+  --divider: #eceef1;
+  --meta-text: #cdced3;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+[data-theme="dark"] {
+  --bg: #1a1b1e;
+  --panel: #202124;
+  --canvas: #1a1b1e;
+  --border: #333538;
+  --text: #a0a4ab;
+  --heading: #e8eaed;
+  --surface: #2a2b2e;
+  --surface-hover: #333538;
+  --surface-active: #3c3e42;
+  --text-dark: #d8dade;
+  --text-muted: #8a8e95;
+  --text-secondary: #a0a4ab;
+  --primary: #3b6cb5;
+  --primary-hover: #4a7bc4;
+  --primary-light: #5a8fd4;
+  --input-bg: #2a2b2e;
+  --input-border: #444648;
+  --placeholder: #6a6e75;
+  --danger: #e07168;
+  --danger-bg: #3a2020;
+  --danger-border: #5a3030;
+  --error: #e07168;
+  --scrollbar: #444648;
+  --chip-border: #444648;
+  --chip-text: #a0a4ab;
+  --bubble-bot-bg: #2a2b2e;
+  --bubble-bot-text: #d8dade;
+  --bubble-bot-border: #333538;
+  --banner-bg: #252628;
+  --auth-gradient-start: #1a1b1e;
+  --auth-gradient-mid: #202124;
+  --auth-gradient-end: #252628;
+  --divider: #333538;
+  --meta-text: #555860;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+}
+
+button,
+input {
+  font: inherit;
+}
