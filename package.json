@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@vercel/blob": "^2.3.3",
     "axios": "^1.15.0",
     "cheerio": "^1.2.0",
     "firebase": "^12.12.0",

@@ -114,11 +114,22 @@ let schoolDataCache = null
 async function loadSchoolData() {
   if (schoolDataCache) return schoolDataCache
   try {
-    const res = await fetch('/schoolData.json')
+    const res = await fetch('/api/data')
     if (!res.ok) throw new Error(res.statusText)
-    schoolDataCache = await res.json()
+    const payload = await res.json()
+    schoolDataCache = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.data)
+        ? payload.data
+        : []
   } catch {
-    schoolDataCache = []
+    try {
+      const res = await fetch('/schoolData.json')
+      if (!res.ok) throw new Error(res.statusText)
+      schoolDataCache = await res.json()
+    } catch {
+      schoolDataCache = []
+    }
   }
   return schoolDataCache
 }

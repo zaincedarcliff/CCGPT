@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const urls = [
+export const urls = [
   "https://www.wssd.k12.pa.us/cedarcliff.aspx",
   "https://psweb.wssd.k12.pa.us/public/",
   "https://sites.google.com/wssd.bz/the-cedar-cliff-colt-online-ne?usp=sharing",
@@ -100,38 +100,50 @@ const urls = [
   "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/field-hockey/freshman/",
 ];
 
-async function updateAllData() {
-  let allData = [];
+export async function scrapeUrl(url) {
+  const { data } = await axios.get(url, {
+    timeout: 15000,
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (compatible; CCGPTBot/1.0; +https://www.wssd.k12.pa.us/cedarcliff.aspx)",
+    },
+  });
+  const $ = cheerio.load(data);
+  const pageText = [];
+  $("h1, h2, h3, p, li, td, th").each((_i, el) => {
+    const text = $(el).text().trim();
+    if (text.length > 40) pageText.push(text);
+  });
+  return {
+    source: url,
+    scrapedAt: new Date().toISOString(),
+    content: pageText,
+  };
+}
 
+export async function runScrape() {
+  const allData = [];
   for (const url of urls) {
     try {
-      const { data } = await axios.get(url, { timeout: 15000 });
-      const $ = cheerio.load(data);
-
-      let pageText = [];
-
-      $("h1, h2, h3, p, li, td, th").each((_i, el) => {
-        const text = $(el).text().trim();
-        if (text.length > 40) {
-          pageText.push(text);
-        }
-      });
-
-      allData.push({
-        source: url,
-        scrapedAt: new Date().toISOString(),
-        content: pageText,
-      });
-
+      const entry = await scrapeUrl(url);
+      allData.push(entry);
       console.log(`Scraped: ${url}`);
     } catch (err) {
       console.log(`Failed: ${url} — ${err.message}`);
     }
   }
+  return allData;
+}
 
+async function updateAllData() {
+  const allData = await runScrape();
   const outPath = path.join(__dirname, "public", "schoolData.json");
   fs.writeFileSync(outPath, JSON.stringify(allData, null, 2));
   console.log(`\u2705 Data updated! Wrote ${outPath}`);
 }
 
-updateAllData();
+const isDirectRun =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectRun) {
+  updateAllData();
+}
