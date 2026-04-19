@@ -53,6 +53,51 @@ const urls = [
   "https://www.wssd.k12.pa.us/FreeandReducedMeals.aspx",
   "https://www.wssd.k12.pa.us/StudentMealAccounts.aspx",
   "https://www.wssd.k12.pa.us/WellnessPolicyNutritionalStandards.aspx",
+
+  // MaxPreps - Cedar Cliff Colts (sports schedules / scores / rosters)
+  // Boys / Co-ed varsity
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/baseball/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/cross-country/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/football/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/golf/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/lacrosse/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/soccer/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/tennis/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/track-field/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/volleyball/boys/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/wrestling/",
+
+  // Girls varsity
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/girls/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/field-hockey/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/golf/girls/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/lacrosse/girls/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/soccer/girls/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/softball/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/tennis/girls/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/track-field/girls/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/volleyball/",
+
+  // JV
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/baseball/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/football/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/lacrosse/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/soccer/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/volleyball/boys/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/girls/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/field-hockey/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/lacrosse/girls/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/soccer/girls/jv/spring/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/softball/jv/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/volleyball/jv/",
+
+  // Freshman
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/freshman/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/football/freshman/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/girls/freshman/",
+  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/field-hockey/freshman/",
 ];
 
 async function updateAllData() {
