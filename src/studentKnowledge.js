@@ -55,38 +55,15 @@ WINTER: Boys & Girls Basketball, Boys & Girls Wrestling, Boys & Girls Swimming &
 SPRING: Baseball, Softball, Boys & Girls Lacrosse, Boys Volleyball, Boys Tennis, Track & Field
 (Some teams also have JV and Freshman squads where offered)
 
-## BOYS BASKETBALL 2025-2026 SEASON RESULTS
-
-COMPLETED GAMES:
-12/3/2025 vs East Pennsboro (Home) - W 55-43
-12/5/2025 vs Dover (Home) - W 65-47
-12/6/2025 @ Red Lion (Away) - L 74-53
-12/10/2025 vs Palmyra* (Home) - W 54-40
-12/12/2025 @ Lower Dauphin* (Away) - W 60-58
-12/17/2025 vs Mechanicsburg* (Home) - W 76-72 (OT)
-12/19/2025 vs Mifflin County* (Home) - W 54-43
-12/22/2025 vs Red Land* (Home) - W 42-38
-12/23/2025 @ Dallastown (Away) - W 57-48
-12/29/2025 vs Bishop McDevitt*** (Home) - L 67-37
-12/30/2025 vs Conestoga Valley*** (Home) - W 61-58
-1/5/2026 @ Hershey* (Away) - L 64-47
-1/8/2026 @ Milton Hershey* (Away) - W 48-40
-1/10/2026 @ York Catholic (Away) - L 67-51
-1/13/2026 @ Palmyra* (Away) - W 66-40
-1/16/2026 vs Lower Dauphin* (Home) - W 71-56
-1/17/2026 vs Hempfield (Home) - Reported
-1/21/2026 @ Mechanicsburg* (Away) - W 62-60
-
-UPCOMING BOYS GAMES:
-1/23/2026 @ Mifflin County* (Away) - 7:00 PM
-1/24/2026 @ Hempfield (Away) - 1:00 PM
-1/27/2026 @ Red Land* (Away) - 7:00 PM
-1/30/2026 vs Hershey* (Home) - 7:00 PM
-2/3/2026 vs Milton Hershey* (Home) - 7:00 PM
-
-UPCOMING GIRLS BASKETBALL GAMES:
-1/27/2026 — Girls Varsity Basketball at Red Land — 2:30 PM
-1/30/2026 — Girls Varsity Basketball at Hershey High School — 4:00 PM
+## ATHLETICS: SCHEDULES, SCORES, AND RECORDS (time-sensitive — read carefully)
+**Do not** invent or recite specific game dates, times, scores, wins/losses, or "games left" from memory or from any static block in this document. Anything like that goes stale within days.
+When the user asks about basketball (or any sport) schedules, remaining games, scores, playoffs, or records:
+- **Use Google Search grounding** when it is available, and prefer facts found in current search results (MaxPreps, official district/athletics pages, PIAA, reputable local coverage).
+- **If search is unavailable or inconclusive**, say that schedules change often and point them to live sources instead of guessing:
+  - Cedar Cliff & district: https://www.wssd.k12.pa.us/cedarcliff.aspx (Athletics / sports links)
+  - Boys basketball (example): https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/
+  - Girls basketball (example): https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/girls/
+- Daily announcements on the school site often list near-term games.
 
 ## COURSE CATALOG (Use ONLY these courses when answering about classes)
 
