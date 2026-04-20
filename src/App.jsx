@@ -1,7 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import cedarCliffLogo from './assets/cedar-cliff-logo.png'
 import { askGemini, isGeminiConfigured, isHomeworkHelpRequest, HOMEWORK_REFUSAL_MESSAGE } from './gemini.js'
-import { loadSchoolData, extractRelevantSnippets, detectNamedSport, extractLatestForSport } from './schoolData.js'
+import {
+  loadSchoolData,
+  extractRelevantSnippets,
+  detectNamedSport,
+  extractLatestForSport,
+  extractAPCourses,
+} from './schoolData.js'
 import { auth, logout, onAuthStateChanged, linkPasswordToCurrentUser } from './firebase.js'
 import Auth from './Auth.jsx'
 import './App.css'
@@ -95,6 +101,14 @@ async function getAIResponse(message) {
   for (const [key, response] of Object.entries(schoolKnowledge)) {
     if (key === 'basketball games') continue
     if (lower.includes(key)) return response
+  }
+
+  if (/\b(ap|advanced\s+placement)\b/i.test(message) && /(course|courses|class|classes|offer|offered|offering|offerings|available|list|have|take|take\s+any|what)\b/i.test(lower)) {
+    const apCourses = extractAPCourses(data)
+    if (apCourses.length > 0) {
+      const bullets = apCourses.map((c) => `• ${c}`).join('\n')
+      return `🎓 **AP Courses Offered at Cedar Cliff**\n\n${bullets}\n\nTalk to your counselor for prerequisites, summer work, and scheduling. Full details: https://www.wssd.k12.pa.us/AdvancedPlacementCourses.aspx`
+    }
   }
 
   if (namedSport) {

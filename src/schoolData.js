@@ -418,6 +418,68 @@ export function extractRelevantSnippets(question, allData, opts = {}) {
   return out
 }
 
+/** Returns a deduplicated, nicely-cased list of AP courses found in the scrape.
+ *  Matches real course titles from WSSD curriculum pages, which follow the
+ *  format "<SUBJECT IN CAPS> (ADVANCED PLACEMENT) (OPTIONAL QUALIFIER)<digits>",
+ *  plus a known mixed-case title: "Pre-calculus Advanced Placement". */
+export function extractAPCourses(allData) {
+  if (!allData || allData.length === 0) return []
+  const found = new Map()
+
+  const prettify = (rawSubject) => {
+    let s = String(rawSubject).replace(/\s+/g, ' ').trim()
+    const upper = s.replace(/[^A-Z]/g, '').length
+    const letters = s.replace(/[^A-Za-z]/g, '').length
+    if (letters > 0 && upper / letters > 0.7) {
+      s = s.replace(/\b([A-Z])([A-Z]+)\b/g, (_, a, b) => a + b.toLowerCase())
+      s = s.replace(/\bAnd\b/g, 'and')
+      s = s.replace(/\bOf\b/g, 'of')
+      s = s.replace(/\bOr\b/g, 'or')
+      s = s.replace(/^Us\b/, 'US')
+      s = s.replace(/\bUs\b/, 'US')
+    }
+    s = s.replace(/\bAb\b/g, 'AB')
+    s = s.replace(/\bBc\b/g, 'BC')
+    return s.replace(/\s+/g, ' ').trim()
+  }
+
+  const add = (subject) => {
+    const pretty = prettify(subject)
+    if (!pretty || pretty.length < 2 || pretty.length > 60) return
+    const key = pretty.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    if (!key || found.has(key)) return
+    found.set(key, `AP ${pretty}`)
+  }
+
+  /** "SUBJECT (ADVANCED PLACEMENT) (OPTIONAL QUALIFIER)" followed by a course code. */
+  const withParens = /\b([A-Z][A-Z0-9 ,'\-&/:]{2,60}?)\s*\(\s*ADVANCED PLACEMENT\s*\)(?:\s*\(([^)]+)\))?\s*\d/g
+  /** "SUBJECT ADVANCED PLACEMENT (OPTIONAL QUALIFIER)" followed by a course code (no parens around ADVANCED PLACEMENT). */
+  const noParens = /\b([A-Z][A-Z0-9 ,'\-&/:]{2,60}?)\s+ADVANCED PLACEMENT(?:\s*\(([^)]+)\))?\s*\d/g
+
+  for (const entry of allData) {
+    for (const raw of entry.content || []) {
+      const s = String(raw)
+      if (!/ADVANCED PLACEMENT/.test(s) && !/Pre-calculus Advanced Placement/.test(s)) continue
+
+      let m
+      while ((m = withParens.exec(s)) !== null) {
+        add(m[1].replace(/\s+/g, ' ').trim())
+      }
+      while ((m = noParens.exec(s)) !== null) {
+        const subject = m[1].replace(/\s+/g, ' ').trim()
+        if (/ADVANCED PLACEMENT/.test(subject)) continue
+        add(subject)
+      }
+
+      if (/Pre-calculus Advanced Placement/.test(s)) {
+        add('Pre-calculus')
+      }
+    }
+  }
+
+  return [...found.values()].sort((a, b) => a.localeCompare(b))
+}
+
 /** Canonical named sports users mention in questions. Shared by extractors. */
 export const NAMED_SPORTS = [
   'basketball', 'football', 'soccer', 'baseball', 'softball', 'lacrosse',
