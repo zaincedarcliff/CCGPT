@@ -4,26 +4,46 @@
 
 let schoolDataCache = null
 
+function toEntries(payload) {
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload?.data)) return payload.data
+  return []
+}
+
+/** Load scraped school data. Fetches **both** the static `/schoolData.json`
+ *  (what was deployed with the latest build) and `/api/data` (Vercel Blob,
+ *  may be updated by a cron), then merges by source URL keeping whichever
+ *  entry has more content lines. That way a freshly deployed scrape isn't
+ *  hidden by a stale blob, and vice versa. */
 export async function loadSchoolData() {
   if (schoolDataCache) return schoolDataCache
-  try {
-    const res = await fetch('/api/data')
-    if (!res.ok) throw new Error(res.statusText)
-    const payload = await res.json()
-    schoolDataCache = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload?.data)
-        ? payload.data
-        : []
-  } catch {
-    try {
-      const res = await fetch('/schoolData.json')
-      if (!res.ok) throw new Error(res.statusText)
-      schoolDataCache = await res.json()
-    } catch {
-      schoolDataCache = []
-    }
+
+  let fromStatic = []
+  let fromApi = []
+
+  const staticReq = fetch('/schoolData.json')
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => [])
+  const apiReq = fetch('/api/data')
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => [])
+
+  const [staticPayload, apiPayload] = await Promise.all([staticReq, apiReq])
+  fromStatic = toEntries(staticPayload)
+  fromApi = toEntries(apiPayload)
+
+  const bySource = new Map()
+  const push = (entry) => {
+    if (!entry?.source) return
+    const existing = bySource.get(entry.source)
+    const size = Array.isArray(entry.content) ? entry.content.length : 0
+    const existingSize = existing?.content?.length || 0
+    if (!existing || size > existingSize) bySource.set(entry.source, entry)
   }
+  for (const e of fromStatic) push(e)
+  for (const e of fromApi) push(e)
+
+  schoolDataCache = [...bySource.values()]
   return schoolDataCache
 }
 
@@ -219,11 +239,6 @@ export function extractRelevantSnippets(question, allData, opts = {}) {
     }
   }
 
-  const NAMED_SPORTS = [
-    'basketball', 'football', 'soccer', 'baseball', 'softball', 'lacrosse',
-    'tennis', 'golf', 'track', 'swim', 'swimming', 'wrestling', 'volleyball',
-    'field hockey', 'cheerleading', 'cross country', 'bocce', 'archery', 'hockey',
-  ]
   const requiredSports = NAMED_SPORTS.filter((s) => q.includes(s))
 
   const ranked = []
@@ -272,6 +287,73 @@ export function extractRelevantSnippets(question, allData, opts = {}) {
     seen.add(key)
     out.push(r)
     if (out.length >= maxSnippets) break
+  }
+  return out
+}
+
+/** Canonical named sports users mention in questions. Shared by extractors. */
+export const NAMED_SPORTS = [
+  'basketball', 'football', 'soccer', 'baseball', 'softball', 'lacrosse',
+  'tennis', 'golf', 'track', 'swim', 'swimming', 'wrestling', 'volleyball',
+  'field hockey', 'cheerleading', 'cross country', 'bocce', 'archery', 'hockey',
+]
+
+/** Returns the first sport name found in the question text, or null. */
+export function detectNamedSport(text) {
+  const t = String(text || '').toLowerCase()
+  for (const s of NAMED_SPORTS) {
+    if (t.includes(s)) return s
+  }
+  return null
+}
+
+function sportUrlPattern(sport) {
+  const slug = sport === 'track' ? 'track-field' : sport.replace(/\s+/g, '-')
+  return new RegExp(`maxpreps\\.com.*${slug}`, 'i')
+}
+
+/** Heuristics that identify a MaxPreps line worth showing (a game recap,
+ *  preview, score line, or dated game-result sentence). */
+const GAME_LINE_PATTERNS = [
+  /^On\s+(Sun|Mon|Tues|Wednes|Thurs|Fri|Satur)day,\s+[A-Z][a-z]+\s+\d+,\s+\d{4}/,
+  /\b(Recap|Preview|Highlights?)\b/i,
+  /\b(Takes? a Loss|Takes? the Win|Beats?|Defeats?|Falls to|Wins?|Extends?|Ends?\s+.*Streak)\b/i,
+  /\b\d+\s*[-–]\s*\d+\b/,
+]
+
+/** Guaranteed fallback: when the keyword-ranked path returns nothing, still
+ *  surface the most recent clean MaxPreps lines for a named sport so the bot
+ *  never says "no updates" while the scrape actually has data. */
+export function extractLatestForSport(sport, allData, opts = {}) {
+  if (!sport || !allData || allData.length === 0) return []
+  const { maxSnippets = 6, maxCharsPerSnippet = 320 } = opts
+  const urlRe = sportUrlPattern(sport)
+  const entries = allData.filter((d) => urlRe.test(d.source))
+  if (entries.length === 0) return []
+
+  const out = []
+  const seen = new Set()
+
+  for (const entry of entries) {
+    for (const raw of entry.content || []) {
+      if (isNavigationBlock(raw)) continue
+      const line = cleanLine(raw)
+      if (line.length < 25) continue
+      if (!GAME_LINE_PATTERNS.some((re) => re.test(line))) continue
+
+      const lower = line.toLowerCase()
+      const key = lower.slice(0, 80)
+      if (seen.has(key)) continue
+      if (out.some((o) => o.line.toLowerCase().includes(lower) || lower.includes(o.line.toLowerCase()))) continue
+      seen.add(key)
+
+      const trimmed =
+        line.length > maxCharsPerSnippet
+          ? line.slice(0, maxCharsPerSnippet - 1).trimEnd() + '…'
+          : line
+      out.push({ line: trimmed, source: entry.source })
+      if (out.length >= maxSnippets) return out
+    }
   }
   return out
 }

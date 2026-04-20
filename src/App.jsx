@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import cedarCliffLogo from './assets/cedar-cliff-logo.png'
 import { askGemini, isGeminiConfigured, isHomeworkHelpRequest, HOMEWORK_REFUSAL_MESSAGE } from './gemini.js'
-import { loadSchoolData, extractRelevantSnippets } from './schoolData.js'
+import { loadSchoolData, extractRelevantSnippets, detectNamedSport, extractLatestForSport } from './schoolData.js'
 import { auth, logout, onAuthStateChanged, linkPasswordToCurrentUser } from './firebase.js'
 import Auth from './Auth.jsx'
 import './App.css'
@@ -48,33 +48,60 @@ function formatScrapedSnippets(snippets) {
   return snippets.map((s) => `• ${s.line}`).join('\n')
 }
 
+async function getSportSnippets(message, data, namedSport) {
+  const scraped = extractRelevantSnippets(message, data, { maxSnippets: 6 })
+  if (scraped.length > 0) return scraped
+  if (!namedSport) return []
+  return extractLatestForSport(namedSport, data, { maxSnippets: 6 })
+}
+
 async function getAIResponse(message) {
   if (isHomeworkHelpRequest(message)) {
     return HOMEWORK_REFUSAL_MESSAGE
   }
   const lower = message.toLowerCase()
 
-  if (/\b(hello|hey|hi)\b/i.test(message)) {
-    return `Hey there! 👋 Welcome to CCGPT — your Cedar Cliff High School assistant. How can I help you today?\n\nYou can ask me about school location, sports, clubs, counselors, contact info, announcements, and more!`
+  if (/^\s*(hello|hey|hi|yo|sup|hola)[!. ]*$/i.test(message)) {
+    return `Hey! I'm CCGPT, your Cedar Cliff High School assistant. Ask me anything — sports updates, bell schedule, counselors, clubs, events, lunch, whatever you need. Go Colts!`
+  }
+
+  let data = []
+  try {
+    data = await loadSchoolData()
+  } catch {
+    data = []
   }
 
   let scraped = []
   try {
-    const data = await loadSchoolData()
     scraped = extractRelevantSnippets(message, data, { maxSnippets: 6 })
   } catch {
     scraped = []
   }
 
+  const namedSport = detectNamedSport(message)
+
+  // Basketball chip or any "basketball" question → always try hard to surface live MaxPreps data.
+  if (lower.includes('basketball')) {
+    let bb = scraped.length > 0 ? scraped : extractLatestForSport('basketball', data, { maxSnippets: 6 })
+    if (bb.length === 0) {
+      // last-resort: girls basketball, JV, freshman pages still live under `basketball` regex,
+      // so this only hits if the scrape has no basketball content at all.
+      return `${schoolKnowledge['basketball games']}\n\nThe scraped feed doesn't have any basketball game data loaded right now. Try another topic, or check MaxPreps directly: https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/`
+    }
+    return `${schoolKnowledge['basketball games']}\n\n**Most recent basketball updates from MaxPreps:**\n${formatScrapedSnippets(bb)}`
+  }
+
   for (const [key, response] of Object.entries(schoolKnowledge)) {
-    if (lower.includes(key)) {
-      if (key === 'basketball games') {
-        if (scraped.length > 0) {
-          return `${response}\n\n**Latest basketball updates from Cedar Cliff:**\n${formatScrapedSnippets(scraped)}`
-        }
-        return `${response}\n\nI don't have any new basketball updates pulled in right now. Try again in a bit, or ask about a specific team (varsity boys, girls basketball, JV, etc.).`
-      }
-      return response
+    if (key === 'basketball games') continue
+    if (lower.includes(key)) return response
+  }
+
+  if (namedSport) {
+    const sportSnips = await getSportSnippets(message, data, namedSport)
+    if (sportSnips.length > 0) {
+      const pretty = namedSport.replace(/\b\w/g, (c) => c.toUpperCase())
+      return `Here's the latest on Cedar Cliff ${pretty} from MaxPreps:\n\n${formatScrapedSnippets(sportSnips)}`
     }
   }
 
@@ -82,7 +109,7 @@ async function getAIResponse(message) {
     if (scraped.length > 0) {
       return `${schoolKnowledge.sports}\n\n**Latest sports updates from Cedar Cliff:**\n${formatScrapedSnippets(scraped)}`
     }
-    return `${schoolKnowledge.sports}\n\nI don't have live updates for that team right now. Try asking about a specific sport (basketball, football, soccer, wrestling, etc.).`
+    return `${schoolKnowledge.sports}\n\nI don't have live updates pulled for that team yet. Try naming a specific sport (basketball, football, soccer, wrestling, etc.) and I'll pull the most recent MaxPreps info.`
   }
 
   if (lower.includes('schedule') || lower.includes('bell')) {
@@ -96,10 +123,10 @@ async function getAIResponse(message) {
   }
 
   if (scraped.length > 0) {
-    return `Here's what I found from Cedar Cliff's recent announcements and pages:\n\n${formatScrapedSnippets(scraped)}`
+    return `Here's what I found from Cedar Cliff's recent pages:\n\n${formatScrapedSnippets(scraped)}`
   }
 
-  return `Thanks for your question! I'm CCGPT, your Cedar Cliff High School assistant. I can help with questions about:\n\n📍 School location\n👤 Counselors\n🏆 Sports\n🎓 Principal & administration\n🏀 Game schedules\n📞 Contact information\n🏫 Clubs & activities\n📃 Senior info\n🕐 Bell schedule\n🍽️ Lunch info\n\nTry asking about one of these topics!`
+  return `I'm not sure I have that one on hand, but I can help with Cedar Cliff info — sports updates, bell schedule, counselors, clubs, events, lunch, senior stuff, contact info, principal, and more. What are you looking for?`
 }
 
 function generateId() {
