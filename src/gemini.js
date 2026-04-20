@@ -173,7 +173,7 @@ function getRelevantData(question, allData) {
 // --------------- homework / anti-cheat ---------------
 
 /** Shown when the user asks for homework answers, solutions, or assignment completion (offline + Gemini). */
-export const HOMEWORK_REFUSAL_MESSAGE = `I can’t help with **homework, assignments, quizzes, tests, labs, essays, or any graded schoolwork** — that’s a hard rule for CCGPT so students don’t use me to cheat.
+export const HOMEWORK_REFUSAL_MESSAGE = `I can’t help with **homework, assignments, quizzes, tests, labs, essays, or any graded schoolwork** — I’m only set up to help with Cedar Cliff school info and general study habits, not completing coursework for you.
 
 **Please use instead:**
 - Your **teacher** (email or before/after class)
