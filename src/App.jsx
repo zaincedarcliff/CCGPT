@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import cedarCliffLogo from './assets/cedar-cliff-logo.png'
 import { askGemini, isGeminiConfigured, isHomeworkHelpRequest, HOMEWORK_REFUSAL_MESSAGE } from './gemini.js'
+import { loadSchoolData, extractRelevantSnippets } from './schoolData.js'
 import { auth, logout, onAuthStateChanged, linkPasswordToCurrentUser } from './firebase.js'
 import Auth from './Auth.jsx'
 import './App.css'
@@ -21,41 +22,64 @@ const schoolKnowledge = {
   'my counselor': `Cedar Cliff High School counselors are assigned by graduating class:\n\n• **Class of 2029 (Freshmen)**: Ms. Meghan Cummings — mcummings@wssd.k12.pa.us, ext. 215\n• **Class of 2028 (Sophomores)**: Mrs. Jessie Alexander-Gray — jalexander@wssd.k12.pa.us, ext. 218\n• **Class of 2027 (Juniors)**: Mrs. Jennifer Crager — jcrager@wssd.k12.pa.us, ext. 219\n• **Class of 2026 (Seniors)**: Mr. Patrick Tierney — ptierney@wssd.k12.pa.us, ext. 220\n\n**Support**: Ms. Stacy Thorpe (GIEP, Life Skills, CTC, ELL) — sthorpe@wssd.k12.pa.us, ext. 217\n**Guidance Secretary**: Ms. Joyce Hayes — jhayes@wssd.k12.pa.us, ext. 221`,
   'sports': `Cedar Cliff offers a wide range of sports programs:\n\n🏈 **Fall**: Football, Boys & Girls Soccer, Field Hockey, Golf, Girls Volleyball, Girls Tennis, Cross Country, Cheerleading\n🏀 **Winter**: Boys & Girls Basketball, Boys & Girls Wrestling, Boys & Girls Swimming & Diving, Unified Bocce, Cheerleading\n⚾ **Spring**: Baseball, Softball, Boys & Girls Lacrosse, Boys Volleyball, Boys Tennis, Track & Field\n\nSome teams also have JV and Freshman squads. Go Colts! 🐴`,
   'principal': `The principal of Cedar Cliff High School is **Mrs. Jennifer S. Post**.\n\nShe became principal for the 2025-26 school year. She started at Cedar Cliff in 2000 as a Social Studies teacher and later served as assistant principal and principal at other district schools.\n\nHer focus is on ensuring students feel welcomed, safe, and supported.\n\nContact the main office at 717-737-8654.`,
-  'basketball games': `Cedar Cliff Colts Basketball 🏀\n\nThe Colts compete in the Mid-Penn Conference.\n\n**Live schedules & scores** change constantly — this app does not keep a fixed game list here.\n\n**Where to look (always current):**\n• **West Shore / Cedar Cliff** — Athletics and announcements: https://www.wssd.k12.pa.us/cedarcliff.aspx\n• **Boys varsity** — MaxPreps: https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/\n• **Girls varsity** — MaxPreps: https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/girls/\n\n**With a Gemini API key** configured for CCGPT, answers can use web search for specific upcoming games and recent results. Without it, use the links above.`,
+  'basketball games': `Cedar Cliff Colts Basketball 🏀\n\nThe Colts compete in the Mid-Penn Conference. I'm pulling the latest basketball updates from the school's real-time announcements and sports pages below.`,
   'contact info': `📞 **Cedar Cliff High School Contact Information**\n\n• **Main Office**: 717-737-8654\n• **Fax**: 717-737-0874\n• **Address**: 1301 Carlisle Road, Camp Hill, PA 17011\n• **District**: West Shore School District\n• **Website**: https://www.wssd.k12.pa.us/cedarcliff.aspx\n• **Instagram**: @cedarcliff_colts`,
   'clubs': `Cedar Cliff offers 50+ clubs and extracurricular activities:\n\n🎭 **Arts & Performance**: Drama Club, Band, Choir, Art Club, Musical\n📚 **Academic**: National Honor Society, Math League, Science Olympiad, Debate Team, Model UN\n🤝 **Service**: Key Club, Student Government, SADD, Interact Club, Friends Forever Club\n💻 **Technology**: Robotics Club, Coding Club\n🌍 **Cultural**: Spanish Club, French Club, Diversity Club\n🎖️ **Leadership**: JROTC (Honor Unit with Distinction)\n⚡ **Other**: Yearbook, School Newspaper, FBLA, DECA, Aquaponics\n\nClub meetings are typically held after school. Check the morning announcements for meeting times!`,
   'senior info': `🎓 **Senior Information (Class of 2026)**\n\n• **Graduation**: PA Farm Show Complex\n• **Cap & Gown**: $45 (cash/check)\n• **Senior Portraits**: Check yearbook info on the school website\n• **Senior Counselor**: Mr. Patrick Tierney — ptierney@wssd.k12.pa.us, ext. 220\n• **Key Events**: Prom, SAT dates, Senior Exit Interviews, Senior Awards Night, Graduation\n• **College Apps**: See your counselor for guidance and recommendation letters\n• **Transcripts**: Request through the guidance office\n\nCongratulations on your senior year, Colt! 🐴`,
 }
 
-function getAIResponse(message) {
+const SPORT_WORDS = [
+  'soccer', 'football', 'basketball', 'baseball', 'softball', 'volleyball', 'lacrosse',
+  'tennis', 'golf', 'hockey', 'wrestling', 'swim', 'swimming', 'track', 'cheer', 'cheerleading',
+  'field hockey', 'cross country', 'bocce', 'colts', 'mid-penn', 'athletic', 'athletics',
+  'varsity', 'freshman', 'jv',
+]
+
+function wantsSportsAnswer(lower) {
+  const wantsStats =
+    /\b(record|records|score|scores|standing|standings|win|wins|loss|losses|tie|ties|game|games|match|season|roster|coach|playoff|playoffs|tournament|left|remaining|upcoming)\b/i.test(
+      lower,
+    )
+  return SPORT_WORDS.some((w) => lower.includes(w)) || wantsStats || lower.includes('sports')
+}
+
+function formatScrapedSnippets(snippets) {
+  if (!snippets || snippets.length === 0) return ''
+  return snippets.map((s) => `• ${s.line}`).join('\n')
+}
+
+async function getAIResponse(message) {
   if (isHomeworkHelpRequest(message)) {
     return HOMEWORK_REFUSAL_MESSAGE
   }
   const lower = message.toLowerCase()
-  for (const [key, response] of Object.entries(schoolKnowledge)) {
-    if (lower.includes(key)) return response
-  }
-  // Use whole-word matching — `includes('hi')` wrongly matched "high", "this", "while", etc.
+
   if (/\b(hello|hey|hi)\b/i.test(message)) {
-    return `Hey there! 👋 Welcome to CCGPT — your Cedar Cliff High School assistant. How can I help you today?\n\nYou can ask me about school location, sports, clubs, counselors, contact info, and more!`
+    return `Hey there! 👋 Welcome to CCGPT — your Cedar Cliff High School assistant. How can I help you today?\n\nYou can ask me about school location, sports, clubs, counselors, contact info, announcements, and more!`
   }
 
-  const sportWords = [
-    'soccer', 'football', 'basketball', 'baseball', 'softball', 'volleyball', 'lacrosse',
-    'tennis', 'golf', 'hockey', 'wrestling', 'swim', 'swimming', 'track', 'cheer', 'cheerleading',
-    'field hockey', 'cross country', 'bocce', 'colts', 'mid-penn', 'athletic', 'athletics',
-    'varsity', 'freshman', 'jv',
-  ]
-  const wantsStats =
-    /\b(record|records|score|scores|standing|standings|win|wins|loss|losses|tie|ties|game|games|match|season|roster|coach)\b/i.test(
-      lower,
-    )
-  if (sportWords.some((w) => lower.includes(w)) || wantsStats || lower.includes('sports')) {
-    return (
-      `${schoolKnowledge.sports}\n\n` +
-      `**Records, scores, and standings** change all season. For the latest soccer (and other team) results, check **Daily Announcements**, the district **Athletics** pages, and team or school social posts.\n\n` +
-      `**Smarter answers:** Whoever hosts this app can add a Google Gemini API key so CCGPT pulls in scraped school pages and answers sports questions with more detail.`
-    )
+  let scraped = []
+  try {
+    const data = await loadSchoolData()
+    scraped = extractRelevantSnippets(message, data, { maxSnippets: 6 })
+  } catch {
+    scraped = []
+  }
+
+  for (const [key, response] of Object.entries(schoolKnowledge)) {
+    if (lower.includes(key)) {
+      if (key === 'basketball games' && scraped.length > 0) {
+        return `${response}\n\n**Latest from school announcements & sports updates:**\n${formatScrapedSnippets(scraped)}`
+      }
+      return response
+    }
+  }
+
+  if (wantsSportsAnswer(lower)) {
+    if (scraped.length > 0) {
+      return `${schoolKnowledge.sports}\n\n**Latest sports updates from Cedar Cliff:**\n${formatScrapedSnippets(scraped)}`
+    }
+    return `${schoolKnowledge.sports}\n\nI don't have live updates for that team right now. Check the **Daily Announcements** or the district **Athletics** pages for the most recent results and schedules.`
   }
 
   if (lower.includes('schedule') || lower.includes('bell')) {
@@ -67,6 +91,11 @@ function getAIResponse(message) {
   if (lower.includes('parking') || lower.includes('drive') || lower.includes('car')) {
     return `🚗 **Student Parking**\n\nStudents who wish to drive to school must:\n1. Have a valid driver's license\n2. Register their vehicle with the main office\n3. Purchase a parking permit\n4. Park only in designated student parking areas\n\nParking permits are available at the beginning of each school year. Contact the main office for pricing and availability.`
   }
+
+  if (scraped.length > 0) {
+    return `Here's what I found from Cedar Cliff's recent announcements and pages:\n\n${formatScrapedSnippets(scraped)}`
+  }
+
   return `Thanks for your question! I'm CCGPT, your Cedar Cliff High School assistant. I can help with questions about:\n\n📍 School location\n👤 Counselors\n🏆 Sports\n🎓 Principal & administration\n🏀 Game schedules\n📞 Contact information\n🏫 Clubs & activities\n📃 Senior info\n🕐 Bell schedule\n🍽️ Lunch info\n\nTry asking about one of these topics!`
 }
 
@@ -224,8 +253,12 @@ function App() {
             aiText = `Sorry, I couldn't reach the AI service right now. Error: ${err.message}\n\nPlease try again in a moment, or check the browser console for details.`
           }
         } else {
-          await new Promise((r) => setTimeout(r, 500))
-          aiText = getAIResponse(trimmed)
+          try {
+            aiText = await getAIResponse(trimmed)
+          } catch (err) {
+            console.error('Offline responder error:', err)
+            aiText = `Sorry, something went wrong loading Cedar Cliff's latest info. Please try again in a moment.`
+          }
         }
 
         const aiMsg = { id: generateId(), role: 'assistant', text: aiText }

@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI, DynamicRetrievalMode } from '@google/generative-ai'
 import { studentKnowledge } from './studentKnowledge.js'
+import { loadSchoolData, getRelevantEntries, formatEntriesForPrompt } from './schoolData.js'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
 const modelName =
@@ -155,91 +156,10 @@ ${studentKnowledge}`
 
 const BASE_INSTRUCTION = CORE_INSTRUCTION
 
-// --------------- scraped data loader ---------------
-
-let schoolDataCache = null
-
-async function loadSchoolData() {
-  if (schoolDataCache) return schoolDataCache
-  try {
-    const res = await fetch('/api/data')
-    if (!res.ok) throw new Error(res.statusText)
-    const payload = await res.json()
-    schoolDataCache = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload?.data)
-        ? payload.data
-        : []
-  } catch {
-    try {
-      const res = await fetch('/schoolData.json')
-      if (!res.ok) throw new Error(res.statusText)
-      schoolDataCache = await res.json()
-    } catch {
-      schoolDataCache = []
-    }
-  }
-  return schoolDataCache
-}
-
-const TOPIC_RULES = [
-  { keywords: ['announcement', 'announcements', 'today', 'happening', 'event', 'events', 'news', 'blood drive', 'paintball', 'trivia', 'school store'],
-    match: (src) => src.includes('DailyAnnouncements') },
-  { keywords: [
-      'sport', 'sports', 'game', 'games', 'score', 'scores', 'record', 'records', 'standing', 'standings',
-      'win', 'wins', 'loss', 'losses', 'season', 'team', 'varsity', 'jv',
-      'basketball', 'football', 'soccer', 'baseball', 'softball', 'lacrosse', 'tennis', 'golf', 'track',
-      'swim', 'swimming', 'wrestling', 'volleyball', 'field hockey', 'cheerleading', 'cross country', 'athlete', 'athletic',
-    ],
-    match: (src) =>
-      src.includes('sports-news') ||
-      src.includes('Athletics') ||
-      src.includes('arbiterlive') ||
-      src.includes('Natatorium') ||
-      src.includes('StadiumBag') },
-  { keywords: ['schedule', 'bell', 'period', 'lunch', 'block'],
-    match: (src) => src.includes('BellSchedule') },
-  { keywords: ['counselor', 'guidance', 'counseling'],
-    match: (src) => src.includes('Guidance') },
-  { keywords: ['newsletter', 'monthly', 'e-news', 'enews'],
-    match: (src) =>
-      src.includes('newsletter') ||
-      src.includes('Monthlye-News') },
-  { keywords: ['lunch', 'cafeteria', 'menu', 'menus', 'food', 'breakfast', 'meal', 'meals', 'free and reduced'],
-    match: (src) =>
-      src.includes('FoodServices') ||
-      src.includes('Menus.aspx') ||
-      src.includes('FreeandReduced') ||
-      src.includes('StudentMealAccounts') ||
-      src.includes('WellnessPolicy') },
-  { keywords: ['community'],
-    match: (src) => src.includes('cc-community-news') },
-  { keywords: ['lifestyle'],
-    match: (src) => src.includes('cc-lifestyle-news') },
-]
-
 function getRelevantData(question, allData) {
-  if (!allData || allData.length === 0) return ''
-
-  const q = question.toLowerCase()
-  const matched = []
-
-  for (const rule of TOPIC_RULES) {
-    if (rule.keywords.some((kw) => q.includes(kw))) {
-      const entry = allData.find((d) => rule.match(d.source))
-      if (entry && !matched.includes(entry)) matched.push(entry)
-    }
-  }
-
-  const entries = matched.length > 0 ? matched : allData
-
-  const sections = entries.map((entry) => {
-    const label = entry.source.split('/').pop().replace('.aspx', '')
-    const lines = entry.content.slice(0, 40).join('\n')
-    return `### ${label}\n${lines}`
-  })
-
-  return sections.join('\n\n')
+  const entries = getRelevantEntries(question, allData)
+  const list = entries.length > 0 ? entries : allData || []
+  return formatEntriesForPrompt(list)
 }
 
 // --------------- homework / anti-cheat ---------------
