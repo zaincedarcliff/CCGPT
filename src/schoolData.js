@@ -50,6 +50,7 @@ export const TOPIC_RULES = [
       'bocce', 'archery',
     ],
     match: (src) =>
+      src.includes('maxpreps.com') ||
       src.includes('sports-news') ||
       src.includes('Athletics') ||
       src.includes('arbiterlive') ||
@@ -143,13 +144,52 @@ function isNavigationBlock(text) {
   const indents = (text.match(/\n\s{6,}/g) || []).length
   if (indents >= 3) return true
   if (/^(About Us|Schools|Departments|Curriculum|School Board|Community)\b/.test(text)) return true
+
+  // MaxPreps + site-nav concatenations that jam nav labels together with no spaces.
+  if (/HomeTeamsPlayers|TeamsPlayersStates|StatesScoresRankings|PopularSports|POPULAR SPORTS|All SportsBoys|Stat leaders/i.test(text)) {
+    return true
+  }
+  // Generic CamelCase run with many nav-ish words jammed together.
+  if (/(Home|Teams|Players|Scores|Rankings|Photos|Videos|Playoffs|News)(?:[A-Z][a-z]+){3,}/.test(text)) {
+    return true
+  }
+  if (/^(Stats are entered|If you know who the head coach|Follow your favorite|Get access to|Don't miss the action|Explore and purchase)/i.test(text)) {
+    return true
+  }
   return false
 }
 
+const DAY_DATE = /(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),\s+[A-Z][a-z]+\s+\d+,\s+\d{4}/
+
 function cleanLine(text) {
-  return String(text || '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  let s = String(text || '').replace(/\s+/g, ' ').trim()
+
+  // MaxPreps often emits: "<Title><Day>, <Mon> <d>, <YYYY><Title>..." — keep just the title.
+  const repeatedTitle = s.match(
+    new RegExp(`^(.+?)${DAY_DATE.source}\\1`),
+  )
+  if (repeatedTitle) {
+    s = repeatedTitle[1].trim()
+  }
+
+  // "Game Results<date>On <date>..." → drop the duplicated prefix.
+  s = s.replace(new RegExp(`^Game Results${DAY_DATE.source}`), '').trim()
+
+  // "<Season> Cedar Cliff Colts ... Season<date>Welcome ..." → keep from "Welcome".
+  s = s.replace(new RegExp(`^[A-Z][a-z]+\\s+Cedar Cliff[^]*?Season${DAY_DATE.source}`), '').trim()
+
+  // Trailing "Cedar Cliff<score>Opponent<score>FinalBox Score" noise after a real sentence.
+  s = s.replace(/\s*Cedar Cliff\s*\d+[A-Za-z .'-]+\d+\s*FinalBox Score\s*$/i, '').trim()
+
+  // Trailing "Tournament Game2026 PIAA Boys' Basketball Championships..." fragment noise.
+  s = s.replace(/\s*Tournament Game\d{4}[^.]*Championship[^.]*$/i, '').trim()
+
+  // Trailing byline + "Read Article" / "Team Reports" noise.
+  s = s.replace(/\s*(Team Reports[•\s]+[A-Z][a-z]+\s+\d+,\s+\d{4}.*)$/i, '').trim()
+  s = s.replace(/\s*(Read Article.*)$/i, '').trim()
+  s = s.replace(/\s*[A-Z][a-z]+\s+[A-Z][a-z]+•[A-Z][a-z]+\s+\d+,\s+\d{4}.*$/, '').trim()
+
+  return s
 }
 
 /** Pick content lines from matched entries that actually answer the user.
@@ -223,6 +263,10 @@ export function extractRelevantSnippets(question, allData, opts = {}) {
   const seen = new Set()
   const out = []
   for (const r of ranked) {
+    const lower = r.line.toLowerCase()
+    if (out.some((o) => o.line.toLowerCase().includes(lower) || lower.includes(o.line.toLowerCase()))) {
+      continue
+    }
     const key = r.line.slice(0, 80).toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
