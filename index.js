@@ -54,6 +54,40 @@ export const urls = [
   "https://www.wssd.k12.pa.us/StudentMealAccounts.aspx",
   "https://www.wssd.k12.pa.us/WellnessPolicyNutritionalStandards.aspx",
 
+  // Academic policies / scheduling (General Information + Important Dates)
+  "https://www.wssd.k12.pa.us/CourseSequencingCredits.aspx",
+  "https://www.wssd.k12.pa.us/CreditRequirements.aspx",
+  "https://www.wssd.k12.pa.us/AcademicContract.aspx",
+  "https://www.wssd.k12.pa.us/AdvancedPlacementCourses.aspx",
+  "https://www.wssd.k12.pa.us/EarlyAdmissions.aspx",
+  "https://www.wssd.k12.pa.us/EarlyGraduation.aspx",
+  "https://www.wssd.k12.pa.us/Make-UpofFailures.aspx",
+  "https://www.wssd.k12.pa.us/ScheduleChanges.aspx",
+  "https://www.wssd.k12.pa.us/SeniorOption.aspx",
+  "https://www.wssd.k12.pa.us/StudyingAbroad.aspx",
+  "https://www.wssd.k12.pa.us/TeenParentingDayCareProgram.aspx",
+  "https://www.wssd.k12.pa.us/WeightedGrades.aspx",
+
+  // Course offerings & descriptions (by department)
+  "https://www.wssd.k12.pa.us/Art.aspx",
+  "https://www.wssd.k12.pa.us/BusinessandMarketing.aspx",
+  "https://www.wssd.k12.pa.us/ComputerScience.aspx",
+  "https://www.wssd.k12.pa.us/EngineeringandTechnology.aspx",
+  "https://www.wssd.k12.pa.us/English.aspx",
+  "https://www.wssd.k12.pa.us/EnglishLanguageDev.aspx",
+  "https://www.wssd.k12.pa.us/HealthPhysicalEd.aspx",
+  "https://www.wssd.k12.pa.us/JuniorReserveOfficersTrainingCorpsJROTC.aspx",
+  "https://www.wssd.k12.pa.us/Library.aspx",
+  "https://www.wssd.k12.pa.us/Mathematics.aspx",
+  "https://www.wssd.k12.pa.us/Music.aspx",
+  "https://www.wssd.k12.pa.us/Science.aspx",
+  "https://www.wssd.k12.pa.us/SocialStudies.aspx",
+  "https://www.wssd.k12.pa.us/SpecialEducation.aspx",
+  "https://www.wssd.k12.pa.us/WorldLanguages.aspx",
+  "https://www.wssd.k12.pa.us/CooperativeEducation.aspx",
+  "https://www.wssd.k12.pa.us/DualEnrollment.aspx",
+  "https://www.wssd.k12.pa.us/PathwayInternships.aspx",
+
   // MaxPreps - Cedar Cliff Colts (sports schedules / scores / rosters)
   // Boys / Co-ed varsity
   "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/baseball/",
@@ -102,10 +136,15 @@ export const urls = [
 
 export async function scrapeUrl(url) {
   const { data } = await axios.get(url, {
-    timeout: 15000,
+    timeout: 20000,
     headers: {
       "User-Agent":
-        "Mozilla/5.0 (compatible; CCGPTBot/1.0; +https://www.wssd.k12.pa.us/cedarcliff.aspx)",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Upgrade-Insecure-Requests": "1",
     },
   });
   const $ = cheerio.load(data);

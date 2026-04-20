@@ -1,6 +1,11 @@
 import { GoogleGenerativeAI, DynamicRetrievalMode } from '@google/generative-ai'
 import { studentKnowledge } from './studentKnowledge.js'
-import { loadSchoolData, getRelevantEntries, formatEntriesForPrompt } from './schoolData.js'
+import {
+  loadSchoolData,
+  getRelevantEntries,
+  getFallbackCurriculumEntries,
+  formatEntriesForPrompt,
+} from './schoolData.js'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
 const modelName =
@@ -120,6 +125,41 @@ You have **three** kinds of context. **Do not** behave as if only the long "supp
 - PowerSchool (grades portal)
 - Electronic Absence Submission
 
+## Academic policies & scheduling pages (scraped; use when the user asks about these)
+- Course Sequencing & Credit Recommendations
+- Credit Requirements & Grade Level Promotion
+- Academic Contracts
+- Advanced Placement Courses
+- Early Admissions / Early Graduation
+- Make-Up of Failures / Summer school
+- Requesting a Schedule Change
+- Senior Option
+- Studying Abroad / Exchange
+- Teen Parenting Day Care Program
+- Weighted Grades
+
+## Course offerings & descriptions (scraped by department — use when the user asks about classes, electives, pathways, prerequisites, or dual enrollment)
+- Art
+- Business and Marketing
+- Computer Science
+- Engineering and Technology
+- English
+- English Language Development (ELD)
+- Health and Physical Education
+- JROTC (Junior Reserve Officers' Training Corps)
+- Library
+- Mathematics
+- Music
+- Science
+- Social Studies
+- Special Education
+- World Languages (Spanish, French)
+- Cooperative Diversified Occupations (Co-Op)
+- Dual Enrollment (HACC, Penn College, Central Penn, HU)
+- Pathway Internships (including ACE)
+
+When a user asks about credit requirements, graduation, AP/dual-enrollment options, weighted grades, schedule changes, senior option, studying abroad, specific courses, or department course offerings, **use the Scraped school data above** (and Google Search if needed) to answer with concrete names, course numbers, prerequisites, or credits — not a generic "check the website."
+
 ## District schools
 Cedar Cliff HS, Red Land HS, Allen MS, Crossroads MS, New Cumberland MS, Fairview Intermediate, Old Trail Intermediate, Fishing Creek Elementary, Highland Elementary, Hillside Elementary, Newberry Elementary, Red Mill Elementary, Rossmoyne Elementary, Washington Heights Elementary, ExCEL Virtual Learning Academy, Cumberland Perry Area CTC.
 
@@ -165,7 +205,10 @@ ${studentKnowledge}`
 const BASE_INSTRUCTION = CORE_INSTRUCTION
 
 function getRelevantData(question, allData) {
-  const entries = getRelevantEntries(question, allData)
+  let entries = getRelevantEntries(question, allData)
+  if (entries.length === 0) {
+    entries = getFallbackCurriculumEntries(allData)
+  }
   const list = entries.length > 0 ? entries : allData || []
   return formatEntriesForPrompt(list)
 }

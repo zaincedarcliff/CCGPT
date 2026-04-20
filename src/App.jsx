@@ -126,7 +126,7 @@ async function getAIResponse(message) {
     return `Here's what I found from Cedar Cliff's recent pages:\n\n${formatScrapedSnippets(scraped)}`
   }
 
-  return `I'm not sure I have that one on hand, but I can help with Cedar Cliff info — sports updates, bell schedule, counselors, clubs, events, lunch, senior stuff, contact info, principal, and more. What are you looking for?`
+  return `I'm not sure I have that one on hand, but I can help with Cedar Cliff info — sports updates, bell schedule, counselors, clubs, events, lunch, credits and graduation requirements, course offerings, senior stuff, contact info, principal, and more. What are you looking for?`
 }
 
 function generateId() {

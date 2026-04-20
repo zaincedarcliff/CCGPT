@@ -109,6 +109,78 @@ export const TOPIC_RULES = [
       src.includes('WellnessPolicy'),
   },
   {
+    id: 'academics',
+    keywords: [
+      'credit', 'credits', 'graduation', 'graduate', 'graduating', 'diploma',
+      'gpa', 'class rank', 'weighted', 'weight', 'honor roll',
+      'ap', 'advanced placement', 'dual enrollment', 'hacc', 'college in the high school',
+      'early admission', 'early admissions', 'early graduation',
+      'schedule change', 'schedule changes', 'senior option', 'senior year',
+      'study abroad', 'studying abroad', 'exchange', 'teen parenting', 'day care',
+      'make-up', 'makeup', 'make up', 'summer school', 'academic contract', 'contract',
+      'course selection', 'course sequencing', 'course requirement', 'requirements',
+      'promotion', 'grade level', 'powerschool',
+    ],
+    match: (src) =>
+      src.includes('CourseSequencing') ||
+      src.includes('CreditRequirements') ||
+      src.includes('AcademicContract') ||
+      src.includes('AdvancedPlacement') ||
+      src.includes('EarlyAdmissions') ||
+      src.includes('EarlyGraduation') ||
+      src.includes('Make-UpofFailures') ||
+      src.includes('ScheduleChanges') ||
+      src.includes('SeniorOption') ||
+      src.includes('StudyingAbroad') ||
+      src.includes('TeenParenting') ||
+      src.includes('WeightedGrades') ||
+      src.includes('DualEnrollment'),
+  },
+  {
+    id: 'courses',
+    keywords: [
+      'course', 'courses', 'class', 'classes', 'elective', 'electives',
+      'offering', 'offerings', 'department', 'curriculum', 'pathway', 'pathways',
+      'prerequisite', 'prerequisites',
+      'art', 'drawing', 'painting', 'ceramics', 'sculpture', 'animation',
+      'business', 'marketing', 'accounting', 'personal finance',
+      'computer science', 'programming', 'microsoft office',
+      'engineering', 'technology', 'drafting', 'woodworking', 'metal', 'photography',
+      'english', 'literature', 'writing', 'language arts', 'esl', 'ell',
+      'health', 'physical education', 'pe ', 'wellness', 'sports medicine',
+      'aquatics', 'lifeguard', 'strength training',
+      'jrotc', 'rotc', 'library',
+      'math', 'mathematics', 'algebra', 'geometry', 'calculus',
+      'statistics', 'pre-calculus', 'precalculus',
+      'music', 'band', 'chorus', 'orchestra', 'choir', 'music theory',
+      'science', 'biology', 'chemistry', 'physics', 'anatomy', 'environmental',
+      'social studies', 'history', 'government', 'economics', 'psychology', 'sociology',
+      'special education',
+      'world language', 'world languages', 'spanish', 'french',
+      'co-op', 'coop', 'cooperative education', 'internship', 'internships',
+      'diversified occupations',
+    ],
+    match: (src) =>
+      src.includes('Art.aspx') ||
+      src.includes('BusinessandMarketing') ||
+      src.includes('ComputerScience') ||
+      src.includes('EngineeringandTechnology') ||
+      src.includes('English.aspx') ||
+      src.includes('EnglishLanguageDev') ||
+      src.includes('HealthPhysicalEd') ||
+      src.includes('JuniorReserveOfficersTrainingCorps') ||
+      src.includes('Library.aspx') ||
+      src.includes('Mathematics') ||
+      src.includes('Music.aspx') ||
+      src.includes('Science.aspx') ||
+      src.includes('SocialStudies') ||
+      src.includes('SpecialEducation') ||
+      src.includes('WorldLanguages') ||
+      src.includes('CooperativeEducation') ||
+      src.includes('DualEnrollment') ||
+      src.includes('PathwayInternships'),
+  },
+  {
     id: 'community',
     keywords: ['community'],
     match: (src) => src.includes('cc-community-news'),
@@ -142,6 +214,50 @@ export function getRelevantEntries(question, allData) {
     }
   }
   return matched
+}
+
+/** District academics / course catalog pages (union of academics + courses TOPIC_RULES matchers). */
+function isCurriculumOrAcademicSource(src) {
+  if (!src) return false
+  const s = String(src)
+  return (
+    s.includes('CourseSequencing') ||
+    s.includes('CreditRequirements') ||
+    s.includes('AcademicContract') ||
+    s.includes('AdvancedPlacement') ||
+    s.includes('EarlyAdmissions') ||
+    s.includes('EarlyGraduation') ||
+    s.includes('Make-UpofFailures') ||
+    s.includes('ScheduleChanges') ||
+    s.includes('SeniorOption') ||
+    s.includes('StudyingAbroad') ||
+    s.includes('TeenParenting') ||
+    s.includes('WeightedGrades') ||
+    s.includes('DualEnrollment') ||
+    s.includes('Art.aspx') ||
+    s.includes('BusinessandMarketing') ||
+    s.includes('ComputerScience') ||
+    s.includes('EngineeringandTechnology') ||
+    s.includes('English.aspx') ||
+    s.includes('EnglishLanguageDev') ||
+    s.includes('HealthPhysicalEd') ||
+    s.includes('JuniorReserveOfficersTrainingCorps') ||
+    s.includes('Library.aspx') ||
+    s.includes('Mathematics') ||
+    s.includes('Music.aspx') ||
+    s.includes('Science.aspx') ||
+    s.includes('SocialStudies') ||
+    s.includes('SpecialEducation') ||
+    s.includes('WorldLanguages') ||
+    s.includes('CooperativeEducation') ||
+    s.includes('PathwayInternships')
+  )
+}
+
+/** When no TOPIC_RULES keyword matches, still search curriculum pages by word overlap. */
+export function getFallbackCurriculumEntries(allData) {
+  if (!allData || allData.length === 0) return []
+  return allData.filter((e) => isCurriculumOrAcademicSource(e.source))
 }
 
 /** Formats matched entries for the Gemini system prompt. */
@@ -217,7 +333,12 @@ function cleanLine(text) {
  *  boosts domain-specific topic keywords heavily, and filters out site navigation. */
 export function extractRelevantSnippets(question, allData, opts = {}) {
   const { maxSnippets = 6, maxCharsPerSnippet = 320 } = opts
-  const entries = getRelevantEntries(question, allData)
+  let entries = getRelevantEntries(question, allData)
+  /** No topic keyword matched — still search course/policy pages by question words. */
+  const fallbackMode = entries.length === 0
+  if (fallbackMode) {
+    entries = getFallbackCurriculumEntries(allData)
+  }
   if (entries.length === 0) return []
 
   const q = question.toLowerCase()
@@ -263,9 +384,15 @@ export function extractRelevantSnippets(question, allData, opts = {}) {
         if (lower.includes(term)) genericHits += 1
       }
 
-      if (domainHits === 0) continue
+      if (fallbackMode) {
+        if (queryTerms.length === 0 || genericHits < 1) continue
+      } else if (domainHits === 0) {
+        continue
+      }
 
-      const score = domainHits * 10 + genericHits
+      const score = fallbackMode
+        ? genericHits * 8 + domainHits * 10
+        : domainHits * 10 + genericHits
       const trimmed =
         line.length > maxCharsPerSnippet
           ? line.slice(0, maxCharsPerSnippet - 1).trimEnd() + '…'
