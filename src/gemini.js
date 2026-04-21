@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, DynamicRetrievalMode } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 import { studentKnowledge } from './studentKnowledge.js'
 import {
   loadSchoolData,
@@ -14,7 +14,7 @@ const apiKey = import.meta.env.VITE_GEMINI_API_KEY
 const modelName =
   import.meta.env.VITE_GEMINI_MODEL?.trim() || 'gemini-2.5-flash'
 
-/** Set VITE_GEMINI_GOOGLE_SEARCH=false to disable (saves grounding billing). Default: on. */
+/** Set VITE_GEMINI_GOOGLE_SEARCH=false to disable grounding (saves billing). Default: on. */
 function isGoogleSearchGroundingEnabled() {
   const v = import.meta.env.VITE_GEMINI_GOOGLE_SEARCH
   if (v === '0' || v === 'false') return false
@@ -22,47 +22,22 @@ function isGoogleSearchGroundingEnabled() {
 }
 
 /**
- * Set VITE_GEMINI_SEARCH_MODE=always to always run Google Search when grounding is on (higher cost).
- * Default: dynamic — the model decides when to search (uses VITE_GEMINI_SEARCH_THRESHOLD when set).
+ * Google Search grounding for Gemini 2.x uses the `googleSearch` tool (no dynamic retrieval knob).
+ * When enabled, the model decides per-turn whether to actually browse — we strongly steer it to
+ * search for any Cedar Cliff / current-info question via the system instruction and query augmentation.
  */
-function googleSearchRetrievalMode() {
-  const v = import.meta.env.VITE_GEMINI_SEARCH_MODE
-  if (v === 'always' || v === 'unspecified') return DynamicRetrievalMode.MODE_UNSPECIFIED
-  return DynamicRetrievalMode.MODE_DYNAMIC
-}
-
 function googleSearchTools() {
   if (!isGoogleSearchGroundingEnabled()) return undefined
-  const mode = googleSearchRetrievalMode()
-  const thresholdRaw = import.meta.env.VITE_GEMINI_SEARCH_THRESHOLD
-  const threshold =
-    thresholdRaw !== undefined && thresholdRaw !== ''
-      ? Number(thresholdRaw)
-      : undefined
-
-  return [
-    {
-      googleSearchRetrieval: {
-        dynamicRetrievalConfig: {
-          mode,
-          ...(mode === DynamicRetrievalMode.MODE_DYNAMIC &&
-          threshold !== undefined &&
-          !Number.isNaN(threshold)
-            ? { dynamicThreshold: threshold }
-            : {}),
-        },
-      },
-    },
-  ]
+  return [{ googleSearch: {} }]
 }
 
-function appendGroundingSources(text, result) {
-  const chunks = result?.response?.candidates?.[0]?.groundingMetadata?.groundingChunks
+function appendGroundingSources(text, response) {
+  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks
   if (!chunks?.length) return text
   const seen = new Set()
   const urls = []
   for (const ch of chunks) {
-    const u = ch.web?.uri
+    const u = ch?.web?.uri || ch?.retrievedContext?.uri
     if (u && !seen.has(u)) {
       seen.add(u)
       urls.push(u)
@@ -87,9 +62,9 @@ const CORE_INSTRUCTION = `You are CCGPT, the official AI assistant for Cedar Cli
 ## Information sources (priority order)
 You have **three** kinds of context. **Do not** behave as if only the long "supplemental" block at the end is your knowledge base.
 
-1. **Google Search grounding (the web)** — When this tool is enabled, use it whenever the user needs **current, verifiable, or time-sensitive** information (news, scores/schedules, "what's happening", deadlines, recent changes, anything that could be wrong if outdated). **Prefer search results over static text** when they conflict. If grounding is disabled in the deployment, say you cannot browse live results and point to official sites.
+1. **Google Search grounding (the web) — YOU HAVE INTERNET ACCESS via the \`googleSearch\` tool.** For **any** factual question about Cedar Cliff High School, West Shore School District, staff, teachers, principal, counselors, events, athletics, bell schedule, clubs, dates, deadlines, policies, addresses, contacts, or anything that might have changed — **CALL THE SEARCH TOOL FIRST**, then answer from what you find. Rewrite the user's question into a strong search query that includes "Cedar Cliff High School Camp Hill PA" (or "West Shore School District"), the specific topic, and the current year when relevant. **Never** say "I can't browse the internet" — you can. **Never** refuse a Cedar Cliff question because the scrape doesn't cover it — **search for it** and cite the URL. Prefer search results over any other context when they conflict.
 
-2. **Scraped school data** — When provided in this prompt (see "Latest scraped school data"), it is pulled from official district/school pages and MaxPreps team feeds. Treat it as **real, current school content** — use it to answer questions directly (including sports scores, recaps, previews, and recent announcements), not just as background. If it has concrete game results, give them. Use Google Search when the question needs something beyond what's in the scrape.
+2. **Scraped school data** — When provided in this prompt (see "Latest scraped school data"), it is pulled from official district/school pages and MaxPreps team feeds. Treat it as **real, current school content** — use it to answer questions directly (including sports scores, recaps, previews, and recent announcements), not just as background. If it has concrete game results, give them. When the scrape looks incomplete, outdated, or off-topic, **use Google Search** to fill the gap.
 
 3. **Supplemental student knowledge** — The large block at the end of this prompt is **additional reference only** (course catalog, stable policies, counselor structure, etc.). It is **not** a substitute for the web for schedules, scores, news, or "what's true today." Use it when helpful; **never** treat it as the only or definitive source for time-sensitive facts.
 
@@ -325,21 +300,54 @@ function wantsLiveSportsAnswer(text) {
   return sport && timeSensitive
 }
 
-/** Likely needs current web facts; prepend a light hint so dynamic retrieval is more likely to search. */
-function likelyNeedsWebSearch(text) {
-  const t = text.toLowerCase()
-  if (t.length < 4) return false
-  return (
-    /\b(latest|current|today|right now|this week|this month|upcoming|soon|recent|news|happening|schedule|deadline|when is|what time|what date|score|scores|standing|standings|playoff|tournament|weather|open|closed|cancelled|canceled|postponed|game|games|match|season|left|remaining)\b/i.test(
-      t,
-    ) ||
-    /\b(website|online|link|search|google|internet|look up|find out)\b/i.test(t)
-  )
+/** Casual greetings / chit-chat that don't need search. Anything else gets search pressure. */
+function isSmallTalk(text) {
+  const t = String(text || '').trim().toLowerCase()
+  if (t.length < 2) return true
+  if (t.length < 20 && /^(hi|hey|hello|yo|sup|howdy|gm|good (morning|afternoon|evening|night)|thanks|thank you|thx|ty|ok|okay|cool|nice|lol|lmao|bye|goodbye|cya|see ya)\b/.test(t)) {
+    return true
+  }
+  return false
 }
 
+/** Looks like a factual question about Cedar Cliff / WSSD — always search. */
+function isCedarCliffFactualQuestion(text) {
+  const t = String(text || '').toLowerCase()
+  if (t.length < 3) return false
+  if (isSmallTalk(t)) return false
+  if (/\b(cedar cliff|wssd|west shore|camp hill|colts|red land|allen ms|crossroads|new cumberland ms)\b/.test(t)) return true
+  // school-topic words strongly imply Cedar Cliff context in this app
+  if (/\b(principal|assistant principal|vice principal|counselor|counselors|teacher|teachers|staff|faculty|athletic director|ad\b|nurse|secretary|office|main office|guidance|tardy|attendance|dress code|handbook|powerschool|skyward)\b/.test(t)) return true
+  if (/\b(school|high school|middle school|elementary|district|campus)\b/.test(t)) return true
+  if (/\b(bell schedule|homeroom|period|lunch|cafeteria|parking|senior|junior|sophomore|freshman|graduation|commencement|prom|homecoming|spirit week|open house|back to school|first day|last day|half day|early dismissal|delayed opening|snow day|closing|closure|calendar)\b/.test(t)) return true
+  if (/\b(sport|sports|athletic|athletics|football|basketball|baseball|softball|soccer|volleyball|lacrosse|hockey|swim|wrestling|track|tennis|golf|field hockey|cheer|cheerleading|cross country|bocce|game|games|schedule|scores?|record|standing|standings|playoff|tournament|roster)\b/.test(t)) return true
+  if (/\b(club|clubs|activity|activities|nhs|national honor society|key club|jrotc|yearbook|musical|band|chorus|orchestra|robotics|newspaper|drama|student council|stuco|fbla|deca)\b/.test(t)) return true
+  if (/\b(course|courses|class|classes|elective|curriculum|ap|advanced placement|honors|dual enroll|hacc|gpa|credit|credits|requirement|requirements)\b/.test(t)) return true
+  if (/\b(address|phone|contact|email|website|map|directions|location|where.*located)\b/.test(t)) return true
+  if (/\b(who (is|are)|what (is|are|time|day|date)|when (is|are|does|do|will)|where (is|are)|how (do|can|much|many|long)|why|which)\b/.test(t)) return true
+  if (/\b(latest|current|today|right now|this week|this month|upcoming|soon|recent|news|happening|deadline|score|scores|standing|standings|playoff|tournament|weather|open|closed|cancelled|canceled|postponed)\b/.test(t)) return true
+  return false
+}
+
+/**
+ * Prepend a grounding directive + a rewritten search query so Gemini's `googleSearch` tool
+ * has every reason to fire, with keywords that actually return Cedar Cliff results.
+ */
 function augmentUserMessageForSearch(userText) {
-  if (!likelyNeedsWebSearch(userText)) return userText
-  return `The user’s question may depend on **current or web-verifiable** information. Use **Google Search grounding** if available; treat supplemental instructions as background, not a substitute for live facts.\n\n---\n\n${userText}`
+  const raw = String(userText || '').trim()
+  if (!raw) return raw
+  if (isSmallTalk(raw)) return raw
+  if (!isCedarCliffFactualQuestion(raw)) return raw
+
+  const year = new Date().getFullYear()
+  const preface = [
+    '[Tool-use instruction — do not quote back to the user]',
+    'Use the `googleSearch` tool to answer this. The question is about Cedar Cliff High School (West Shore School District, Camp Hill, PA 17011).',
+    `Build your search query around: "Cedar Cliff High School" OR "West Shore School District" + the specific topic the user asked about${/\b(this year|current|latest|upcoming|now|today|recent)\b/i.test(raw) ? ` + ${year}` : ''}.`,
+    'If the first search misses, try "wssd.k12.pa.us" + the topic, or "Cedar Cliff Colts" + the topic. Cite the URLs you used.',
+    'Do NOT refuse, hedge, or say you can\'t browse — you can. Answer with the fresh facts you find, then briefly point to the official page.',
+  ].join('\n')
+  return `${preface}\n\n---\nUser question: ${raw}`
 }
 
 // --------------- public API ---------------
@@ -390,42 +398,49 @@ export async function askGemini(userText) {
   if (wantsLiveSportsAnswer(userText)) {
     systemInstruction += `\n\n## Priority for this message\nThe user asked about sports games, schedules, or scores. **Use Google Search grounding** to answer with current information. Do not rely on older announcement snippets alone for a full schedule — confirm against search when possible. If scraped lines conflict with search, prefer search for dates and scores.`
   }
+  if (isCedarCliffFactualQuestion(userText)) {
+    systemInstruction += `\n\n## Priority for this message\nThis is a factual Cedar Cliff / West Shore question. **CALL the \`googleSearch\` tool** before drafting your final answer. Use "Cedar Cliff High School Camp Hill PA" or "West Shore School District" plus the topic. Cite the URLs you used at the bottom.`
+  }
 
-  const genAI = new GoogleGenerativeAI(String(apiKey).trim())
+  const ai = new GoogleGenAI({ apiKey: String(apiKey).trim() })
   const tools = googleSearchTools()
+  const contents = augmentUserMessageForSearch(userText)
 
-  const model = genAI.getGenerativeModel({
-    model: modelName,
-    systemInstruction,
-    ...(tools ? { tools } : {}),
-  })
-
-  const contentPayload = augmentUserMessageForSearch(userText)
-
-  let result
+  let response
   try {
-    result = await model.generateContent(contentPayload)
+    response = await ai.models.generateContent({
+      model: modelName,
+      contents,
+      config: {
+        systemInstruction,
+        ...(tools ? { tools } : {}),
+      },
+    })
   } catch (err) {
-    if (
-      tools &&
-      (err?.message?.includes('tool') ||
-        err?.message?.includes('GoogleSearch') ||
-        err?.status === 400)
-    ) {
-      const fallback = genAI.getGenerativeModel({ model: modelName, systemInstruction })
-      result = await fallback.generateContent(contentPayload)
+    // Fall back without tools if the model/region rejects Google Search grounding.
+    const msg = String(err?.message || '')
+    const looksLikeToolError =
+      /tool|googleSearch|google_search|grounding|unsupported/i.test(msg) ||
+      err?.status === 400
+    if (tools && looksLikeToolError) {
+      console.warn('[gemini] googleSearch tool rejected, retrying without it:', msg)
+      response = await ai.models.generateContent({
+        model: modelName,
+        contents,
+        config: { systemInstruction },
+      })
     } else {
       throw err
     }
   }
 
-  let text = result.response.text()
+  let text = response?.text
   if (!text || !String(text).trim()) {
     throw new Error('Empty response from Gemini')
   }
   text = String(text).trim()
   if (isGoogleSearchGroundingEnabled() && tools) {
-    text = appendGroundingSources(text, result)
+    text = appendGroundingSources(text, response)
   }
   return text
 }
