@@ -202,11 +202,15 @@ async function getAIResponse(message) {
     return `🚗 **Student Parking**\n\nStudents who wish to drive to school must:\n1. Have a valid driver's license\n2. Register their vehicle with the main office\n3. Purchase a parking permit\n4. Park only in designated student parking areas\n\nParking permits are available at the beginning of each school year. Contact the main office for pricing and availability.`
   }
 
-  if (scraped.length > 0) {
-    return `Here's what I found from Cedar Cliff's recent pages:\n\n${formatScrapedSnippets(scraped)}`
+  /** Only show a scraped-line answer when the match is strong. A single weak keyword
+   *  overlap (like the word "students" showing up in course descriptions) is not a real
+   *  answer and just confuses the user. */
+  const hasStrongMatch = scraped.length >= 2 && (scraped[0]?.score ?? 0) >= 10
+  if (hasStrongMatch) {
+    return `Here's what I found on Cedar Cliff's pages:\n\n${formatScrapedSnippets(scraped.slice(0, 4))}`
   }
 
-  return `I'm not sure I have that one on hand, but I can help with Cedar Cliff info — sports updates, bell schedule, counselors, clubs, events, lunch, credits and graduation requirements, course offerings, senior stuff, contact info, principal, and more. What are you looking for?`
+  return `I don't have a confident answer for that offline. I'm running without my live AI brain right now — the site admin needs to add the \`VITE_GEMINI_API_KEY\` environment variable in Vercel and redeploy so I can search the web for current info.\n\nIn the meantime, I can help with: bell schedule, lunch, sports, counselors, principal, clubs, senior info, contact info, course offerings, and graduation requirements. What are you looking for?`
 }
 
 function generateId() {
@@ -495,9 +499,20 @@ function App() {
           </div>
 
           <div className="topbar__actions">
-            <span className="status-pill">
-              <span className="status-pill__dot" aria-hidden="true" />
-              Online
+            <span
+              className="status-pill"
+              title={
+                isGeminiConfigured()
+                  ? 'Live AI + Google Search enabled'
+                  : 'Gemini API key not set — running in offline mode. Add VITE_GEMINI_API_KEY in Vercel → redeploy.'
+              }
+            >
+              <span
+                className="status-pill__dot"
+                aria-hidden="true"
+                style={{ background: isGeminiConfigured() ? undefined : '#f59e0b' }}
+              />
+              {isGeminiConfigured() ? 'Online' : 'Offline mode'}
             </span>
             <button
               className="theme-toggle"

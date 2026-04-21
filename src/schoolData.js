@@ -385,7 +385,13 @@ export function extractRelevantSnippets(question, allData, opts = {}) {
       }
 
       if (fallbackMode) {
-        if (queryTerms.length === 0 || genericHits < 1) continue
+        /** In fallback (no topic match), a single generic word hit is not enough —
+         *  the question doesn't clearly map to any scraped topic, so we require
+         *  multiple query words to line up before we'll quote a line. This stops
+         *  noise like "how many students" from pulling a pile of course descriptions
+         *  that happen to contain the word "students". */
+        const threshold = Math.min(2, Math.max(1, Math.ceil(queryTerms.length / 2)))
+        if (queryTerms.length === 0 || genericHits < threshold) continue
       } else if (domainHits === 0) {
         continue
       }
