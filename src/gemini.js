@@ -31,23 +31,6 @@ function googleSearchTools() {
   return [{ googleSearch: {} }]
 }
 
-function appendGroundingSources(text, response) {
-  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks
-  if (!chunks?.length) return text
-  const seen = new Set()
-  const urls = []
-  for (const ch of chunks) {
-    const u = ch?.web?.uri || ch?.retrievedContext?.uri
-    if (u && !seen.has(u)) {
-      seen.add(u)
-      urls.push(u)
-    }
-  }
-  if (!urls.length) return text
-  const lines = urls.slice(0, 8).map((u) => `- ${u}`)
-  return `${text}\n\n**Sources (web)**\n${lines.join('\n')}`
-}
-
 const CORE_INSTRUCTION = `You are CCGPT, the official AI assistant for Cedar Cliff High School (West Shore School District, Camp Hill, Pennsylvania).
 
 ## How to behave (ChatGPT-style)
@@ -176,7 +159,7 @@ If you are unsure whether a request is graded work, **treat it as graded work an
 - **Use \`**bold**\` sparingly** — a few key labels max. Don't bold every other word. No markdown tables. Don't wrap things in headings unless the answer really has multiple sections.
 - **Emojis**: only if the user used one first, or for a natural match (🏀 for basketball, 🎓 for graduation). Don't sprinkle.
 - **Match length to question.** One-line question → one-line answer. Broad question → a few short sentences.
-- If you searched the web, end with a single short "**Source:** <best url>" line (the tool-added "Sources (web)" footer will handle the rest — don't duplicate it).
+- **Do NOT list sources, citations, URLs, or "Source:" lines in your reply.** Just answer the question — do not print the URLs you searched. (The app hides them on purpose.)
 - **Never** pad the answer with "I hope this helps!" / "Feel free to ask…" / "As an AI…". Just answer.
 
 ## Content guidelines
@@ -447,9 +430,19 @@ export async function askGemini(userText) {
   if (!text || !String(text).trim()) {
     throw new Error('Empty response from Gemini')
   }
-  text = String(text).trim()
-  if (isGoogleSearchGroundingEnabled() && tools) {
-    text = appendGroundingSources(text, response)
-  }
+  text = stripSourcesFooter(String(text).trim())
   return text
+}
+
+/** Remove any "Sources / Source / References / Citations" trailer + trailing bare URLs
+ *  the model may print despite the system-prompt rule. We want clean answers only. */
+function stripSourcesFooter(text) {
+  if (!text) return text
+  let out = text
+  out = out.replace(
+    /\n+\s*(?:\*{0,2}|#{1,6}\s*)(?:sources?|references?|citations?|links?)\b[^\n]*[\s\S]*$/i,
+    '',
+  )
+  out = out.replace(/(?:\n[^\n]*https?:\/\/\S+[^\n]*)+\s*$/g, '')
+  return out.trimEnd()
 }
