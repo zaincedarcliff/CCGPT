@@ -5,7 +5,8 @@ import {
   getRelevantEntries,
   getFallbackCurriculumEntries,
   formatEntriesForPrompt,
-  extractCourseCatalog,
+  extractCourses,
+  groupCoursesByDept,
   isCourseListQuestion,
 } from './schoolData.js'
 
@@ -369,13 +370,21 @@ export async function askGemini(userText) {
   }
 
   if (isCourseListQuestion(userText)) {
-    const catalog = extractCourseCatalog(data)
-    const deptSections = Object.entries(catalog)
-      .filter(([, titles]) => titles.length > 0)
-      .map(([dept, titles]) => `- **${dept}** (${titles.length}): ${titles.join('; ')}`)
-      .join('\n')
-    if (deptSections) {
-      systemInstruction += `\n\n## Cedar Cliff course catalog (structured)\nThe user is asking about courses/classes offered. Below is the authoritative list of Cedar Cliff courses grouped by department, extracted from the West Shore School District curriculum pages. When answering, **format your reply as a clean bulleted list grouped by department** (not prose paragraphs). If the user asked about one department, return only that department's courses.\n\n${deptSections}`
+    const allCourses = extractCourses(data)
+    if (allCourses.length > 0) {
+      const grouped = groupCoursesByDept(allCourses)
+      const deptSections = Object.entries(grouped)
+        .map(([dept, list]) => {
+          const lines = list.map((c) => {
+            const flags = c.tags.filter((t) =>
+              ['AP', 'Honors', 'Dual Enrollment', 'NCAA', 'College', 'HACC', 'Harrisburg University', 'Penn College', 'Semester', 'Full Year'].includes(t),
+            )
+            return `  - ${c.title}${flags.length ? ` [${flags.join(', ')}]` : ''}`
+          })
+          return `- **${dept}** (${list.length}):\n${lines.join('\n')}`
+        })
+        .join('\n')
+      systemInstruction += `\n\n## Cedar Cliff course catalog (structured, with tags)\nThe user is asking about courses/classes offered at Cedar Cliff. Below is the authoritative list of courses extracted from the West Shore School District curriculum pages, grouped by department. Each course includes relevant tags in brackets: AP, Honors, Dual Enrollment, NCAA-eligible, College (college-level), HACC / Harrisburg University / Penn College (partner institution), Semester, or Full Year.\n\n### Response rules\n- **Always format as a clean bulleted list** (not prose paragraphs). Group by department when listing many courses.\n- **Filter the list to what the user actually asked for.** If they asked for "dual enrollment classes", return only courses tagged Dual Enrollment. If they asked for "Honors English", return only English courses tagged Honors. Combine filters intelligently.\n- **Be flexible about phrasing.** "AP classes", "advanced placement courses", "AP offerings", "what APs can I take" should all produce the AP list. Likewise "HACC", "college in high school", "college courses", "dual enrollment" are all near-synonyms — use them interchangeably when reasonable.\n- If no courses match the combination, say so and suggest a related filter (e.g. "Cedar Cliff doesn't currently list an Honors Math course. The closest options are: Calculus, AP Calculus AB, AP Calculus BC, AP Statistics…").\n- Keep prerequisites / credit / summer-work mentions brief — point students to the counselor for scheduling.\n\n### Course data\n${deptSections}`
     }
   }
   if (wantsLiveSportsAnswer(userText)) {

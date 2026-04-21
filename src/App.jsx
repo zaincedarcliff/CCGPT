@@ -7,7 +7,10 @@ import {
   detectNamedSport,
   extractLatestForSport,
   extractAPCourses,
-  extractCourseCatalog,
+  extractCourses,
+  groupCoursesByDept,
+  filterCourses,
+  parseCourseQuery,
   isCourseListQuestion,
   COURSE_DEPARTMENTS,
 } from './schoolData.js'
@@ -114,60 +117,63 @@ async function getAIResponse(message) {
     }
   }
 
-  const courseDeptKeywords = {
-    'Art': ['art', 'drawing', 'painting', 'ceramic', 'ceramics', 'sculpture', 'animation', 'studio'],
-    'Business & Marketing': ['business', 'marketing', 'accounting', 'finance', 'entrepreneur'],
-    'Computer Science': ['computer science', 'computers', 'programming', 'coding', 'cs ', 'compsci'],
-    'Engineering & Technology': ['engineering', 'technology', 'drafting', 'wood', 'woodworking', 'metal', 'robotics', 'drone', 'photo', 'graphic'],
-    'English': ['english', 'literature', 'writing', 'composition', 'language arts', 'broadcast', 'journalism'],
-    'English Language Development (ESL)': ['esl', 'ell', 'eld', 'english language development'],
-    'Health & Physical Education': ['health', 'phys ed', 'physical education', ' pe ', 'wellness', 'sports medicine', 'fitness', 'lifeguard'],
-    'JROTC': ['jrotc', 'rotc', 'military'],
-    'Library': ['library', 'media center'],
-    'Mathematics': ['math', 'mathematics', 'algebra', 'geometry', 'calculus', 'statistics', 'pre-calc', 'precalc'],
-    'Music': ['music', 'band', 'choir', 'chorus', 'orchestra', 'jazz', 'ensemble'],
-    'Science': ['science', 'biology', 'chemistry', 'physics', 'anatomy', 'environmental'],
-    'Social Studies': ['social studies', 'history', 'government', 'economics', 'psychology', 'sociology', 'world religions'],
-    'Special Education': ['special education', 'special ed', 'life skills'],
-    'World Languages': ['world language', 'world languages', 'spanish', 'french', 'german', 'chinese', 'foreign language'],
-    'Cooperative Education': ['co-op', 'coop', 'cooperative education'],
-    'Pathway Internships': ['internship', 'internships', 'pathway'],
-  }
-
-  const buildCourseListResponse = (catalog, dept, titles) => {
-    const bullets = titles.map((t) => `• ${t}`).join('\n')
-    return `📚 **${dept} Courses**\n\n${bullets}\n\nThis list is pulled from the West Shore School District curriculum guide. Prerequisites, credits, and weights vary — check with your counselor for scheduling.`
-  }
-
   if (isCourseListQuestion(message)) {
-    const catalog = extractCourseCatalog(data)
-    const deptNames = Object.keys(catalog)
+    const allCourses = extractCourses(data)
+    if (allCourses.length > 0) {
+      const deptNames = [...new Set(allCourses.map((c) => c.dept))]
+      const query = parseCourseQuery(message, deptNames)
+      const filtered = filterCourses(allCourses, {
+        tags: query.tags,
+        dept: query.dept,
+      })
 
-    if (deptNames.length > 0) {
-      let matchedDept = null
-      for (const dept of deptNames) {
-        const kws = courseDeptKeywords[dept] || []
-        if (kws.some((kw) => lower.includes(kw))) {
-          matchedDept = dept
-          break
-        }
+      const formatTitle = (c) => {
+        const badge = c.tags.filter((t) => ['AP', 'Honors', 'Dual Enrollment', 'NCAA'].includes(t))
+        const suffix = badge.length > 0 ? ` _(${badge.join(', ')})_` : ''
+        return `• ${c.title}${suffix}`
       }
 
-      if (matchedDept) {
-        return buildCourseListResponse(catalog, matchedDept, catalog[matchedDept])
+      const buildHeading = () => {
+        const parts = []
+        if (query.tags.length > 0) parts.push(query.tags.join(' + '))
+        if (query.dept) parts.push(query.dept)
+        const label = parts.length > 0 ? parts.join(' · ') : 'All'
+        return `📚 **${label} Courses at Cedar Cliff**`
       }
 
-      const total = Object.values(catalog).reduce((a, b) => a + b.length, 0)
-      const sections = COURSE_DEPARTMENTS
-        .map((d) => d.name)
-        .filter((name) => catalog[name] && catalog[name].length > 0)
+      if (filtered.length === 0) {
+        const label = [query.tags.join(' + '), query.dept].filter(Boolean).join(' + ') || 'that'
+        return `I couldn't find any ${label} courses in the current WSSD curriculum pages. I have **${allCourses.length}** courses across ${deptNames.length} departments on file — try a different combination (e.g. "Dual Enrollment classes", "Honors math", "Art courses", "AP science").`
+      }
+
+      if (query.dept && query.tags.length === 0) {
+        const bullets = filtered.map(formatTitle).join('\n')
+        return `${buildHeading()}\n\n${bullets}\n\nThis list is from the West Shore School District curriculum guide. Prerequisites, credits, and weights vary — check with your counselor.`
+      }
+
+      if (query.tags.length > 0) {
+        const grouped = groupCoursesByDept(filtered)
+        const orderedDepts = COURSE_DEPARTMENTS.map((d) => d.name).filter((n) => grouped[n])
+        const sections = orderedDepts
+          .map((name) => {
+            const items = grouped[name].map(formatTitle).join('\n')
+            return `### ${name} (${grouped[name].length})\n${items}`
+          })
+          .join('\n\n')
+        const count = filtered.length
+        return `${buildHeading()} — ${count} course${count === 1 ? '' : 's'}\n\n${sections}\n\nWant narrower results? Try combining filters like "Honors English", "AP science", or "Dual Enrollment social studies".`
+      }
+
+      const total = filtered.length
+      const grouped = groupCoursesByDept(filtered)
+      const orderedDepts = COURSE_DEPARTMENTS.map((d) => d.name).filter((n) => grouped[n])
+      const sections = orderedDepts
         .map((name) => {
-          const titles = catalog[name]
-          const bullets = titles.map((t) => `• ${t}`).join('\n')
-          return `### ${name} (${titles.length})\n${bullets}`
+          const items = grouped[name].map(formatTitle).join('\n')
+          return `### ${name} (${grouped[name].length})\n${items}`
         })
         .join('\n\n')
-      return `📚 **Cedar Cliff Course Catalog** — ${total} courses across ${deptNames.length} departments.\n\n${sections}\n\nTip: ask me for a specific department (e.g. "What math courses are offered?" or "Science classes") for a shorter list. For the full official guide, see the West Shore School District curriculum pages.`
+      return `📚 **Cedar Cliff Course Catalog** — ${total} courses across ${deptNames.length} departments.\n\n${sections}\n\nTip: ask me to filter. Try "What AP science courses are offered?", "Honors English classes", "Dual Enrollment courses", or just "Math courses".`
     }
   }
 

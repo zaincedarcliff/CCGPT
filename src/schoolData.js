@@ -545,33 +545,91 @@ function prettifyCourseTitle(raw) {
   return out.join(' ').replace(/\s+/g, ' ').trim()
 }
 
-/** Pulls every course title from WSSD curriculum pages, grouped by department.
- *  Course lines in the scrape follow the pattern:
- *    "<TITLE IN CAPS><6+ digit code>[.5|1] Credit(s) ... Weight..."
- *  Returns a map: { [deptName]: string[] of prettified titles, sorted } */
-export function extractCourseCatalog(allData) {
-  const catalog = {}
-  if (!allData || allData.length === 0) return catalog
+/** Heuristically tag a course from its raw line + nearby description text.
+ *  To avoid bleed from prose descriptions that *mention* other pathways
+ *  (e.g. an honors course description saying "leads to Advanced Placement"),
+ *  pathway tags (AP, Honors, Dual Enrollment) are only detected in:
+ *    - the course title itself, OR
+ *    - the short metadata "tag line" right after the credit/weight block
+ *      (before "Prerequisite(s):" or the first prose sentence). */
+function detectCourseTags(title, contextText) {
+  const tags = new Set()
+  const t = title.toUpperCase()
+  const ctx = String(contextText || '').replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, ' ')
 
-  const rawByDept = {}
+  // The catalog format puts attribute tags (NCAA, AP, Dual Enrollment, etc.)
+  // between the "Weight" marker and either "Prerequisite(s):" or the start of
+  // the prose description. Extract just that slice for pathway detection.
+  let tagBand = ctx
+  const prereqIdx = tagBand.search(/Prerequisite\(s\)/i)
+  if (prereqIdx >= 0) tagBand = tagBand.slice(0, prereqIdx)
+  tagBand = tagBand.slice(0, 200)
+  // The scrape often concatenates labels with no whitespace ("WeightNCAA",
+  // "NCAAAPDualEnrollment"). Insert spaces at case transitions so word-boundary
+  // regexes match each label.
+  tagBand = tagBand
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]{2,})(?=[A-Z][a-z])/g, '$1 ')
+    .replace(/\s+/g, ' ')
+
+  const titleAndBand = `${t} ${tagBand}`
+
+  if (/\bAP\b/.test(titleAndBand) || /ADVANCED PLACEMENT/i.test(titleAndBand)) tags.add('AP')
+  if (/\bHONORS\b/i.test(titleAndBand)) tags.add('Honors')
+  if (/DUAL ENROLLMENT/i.test(titleAndBand) || /\bCollege in (?:the )?High School\b/i.test(titleAndBand)) {
+    tags.add('Dual Enrollment')
+  }
+
+  // Always-safe tags (depend on title or whole context).
+  if (/^COLLEGE\b/.test(t) || /\bCOLLEGE\b/.test(t)) tags.add('College')
+  if (/\bNCAA\b/.test(tagBand)) tags.add('NCAA')
+  if (/\bHACC\b/i.test(ctx) || /Harrisburg Area Community College/i.test(ctx)) tags.add('HACC')
+  // Catch courses that are clearly dual-enrollment by description even when
+  // the short tag band didn't explicitly say "Dual Enrollment".
+  if (!tags.has('Dual Enrollment')) {
+    if ((/^COLLEGE\b/.test(t) || /\bCOLLEGE\b/.test(t)) && (tags.has('HACC') || /Harrisburg University/i.test(ctx) || /Penn College/i.test(ctx))) {
+      tags.add('Dual Enrollment')
+    }
+  }
+  if (/\bHarrisburg University\b/i.test(ctx) || /\bHU\b/.test(tagBand) || /\(HU [A-Z]/.test(title)) {
+    tags.add('Harrisburg University')
+  }
+  if (/Penn College|Pennsylvania College of Technology/i.test(ctx)) tags.add('Penn College')
+  if (/\(SEMESTER\)|\bSEMESTER\b/i.test(t)) tags.add('Semester')
+  if (/\(FULL YEAR\)|\(YEAR LONG\)|\bFULL YEAR\b|\bYEAR LONG\b/i.test(t)) tags.add('Full Year')
+  if (/Teacher Recommendation/i.test(tagBand)) tags.add('Teacher Recommendation Required')
+  if (/summer (?:reading|work|assignment)/i.test(ctx)) tags.add('Summer Work')
+  if (/\bLEVEL 1\b/i.test(t) || /\bLEVEL I\b/i.test(t)) tags.add('Level 1')
+  if (/\bLEVEL 2\b/i.test(t) || /\bLEVEL II\b/i.test(t)) tags.add('Level 2')
+
+  return [...tags]
+}
+
+/** Extract a list of course objects from WSSD curriculum pages.
+ *  Each object: { title, dept, source, tags: string[], description }
+ *  Each title is prettified; tags are inferred from the raw course line and the
+ *  following content chunk so questions can filter by AP / Dual Enrollment /
+ *  Honors / College / HACC / Semester / Full Year / etc. */
+export function extractCourses(allData) {
+  const results = []
+  if (!allData || allData.length === 0) return results
+
+  const nextCourseRe = /[A-Z][A-Z0-9 \-&',/:()\.]{2,90}?\d{6,}(?:\s*\.?\s*\d+)?\s*Credits?\b/
+
   for (const entry of allData) {
     const dept = departmentForSource(entry.source)
     if (!dept) continue
-    const seenTitles = (rawByDept[dept] ||= new Map())
-    for (const raw of entry.content || []) {
-      const s = String(raw).replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, ' ')
+    const content = entry.content || []
+    for (let i = 0; i < content.length; i++) {
+      const rawLine = String(content[i]).replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, ' ')
       const courseRe = /([A-Z][A-Z0-9 \-&',/:()\.]{2,90}?)(\d{6,})(?:\s*\.?\s*\d+)?\s*Credits?\b/g
       let m
-      while ((m = courseRe.exec(s)) !== null) {
+      while ((m = courseRe.exec(rawLine)) !== null) {
         let title = m[1].replace(/\s+/g, ' ').trim()
 
-        // Common scrape artifact: title ending in "LEVEL" loses its trailing
-        // level number to the course code. Steal the first digit back.
         if (/\bLEVEL$/.test(title) && /^\d/.test(m[2])) {
           title = `${title} ${m[2].slice(0, 1)}`
         }
-
-        // Drop trailing stray punctuation / hanging connector words.
         title = title.replace(/[\s\-–:,]+$/, '').trim()
         title = title.replace(/\s+\-\s+$/, '').trim()
 
@@ -580,30 +638,168 @@ export function extractCourseCatalog(allData) {
         if (/^(THE|A|AN|AND|OR|OF|IN|ON|FOR|WITH|TO)\b/.test(title)) continue
 
         const pretty = prettifyCourseTitle(title)
-        const key = pretty.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-        if (!key || seenTitles.has(key)) continue
-        seenTitles.set(key, pretty)
+
+        const startCtx = m.index + m[0].length
+        const restOfLine = rawLine.slice(startCtx)
+        const nextMatch = restOfLine.match(nextCourseRe)
+        const lineContext = nextMatch ? restOfLine.slice(0, nextMatch.index) : restOfLine
+
+        let combined = lineContext
+        if (!nextMatch) {
+          const nextBlock = String(content[i + 1] || '').replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, ' ')
+          if (nextBlock && !nextCourseRe.test(nextBlock)) {
+            combined = `${lineContext} ${nextBlock}`
+          }
+        }
+        const contextText = combined.slice(0, 1200).trim()
+        const tags = detectCourseTags(title, contextText)
+
+        results.push({
+          title: pretty,
+          dept,
+          source: entry.source,
+          tags,
+          description: contextText,
+        })
       }
     }
   }
 
-  for (const dept of Object.keys(rawByDept)) {
-    const titles = [...rawByDept[dept].values()].sort((a, b) => a.localeCompare(b))
-    if (titles.length > 0) catalog[dept] = titles
+  const seen = new Set()
+  const unique = []
+  for (const c of results) {
+    const key = `${c.dept}|${c.title.toLowerCase()}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(c)
   }
-  return catalog
+  unique.sort((a, b) => a.dept.localeCompare(b.dept) || a.title.localeCompare(b.title))
+  return unique
 }
 
-/** Does this question ask for a course list / catalog? */
+/** Group a flat list of course objects by department. */
+export function groupCoursesByDept(courses) {
+  const grouped = {}
+  for (const c of courses) {
+    if (!grouped[c.dept]) grouped[c.dept] = []
+    grouped[c.dept].push(c)
+  }
+  return grouped
+}
+
+/** Back-compat wrapper: { deptName: string[] of titles } */
+export function extractCourseCatalog(allData) {
+  const courses = extractCourses(allData)
+  const grouped = groupCoursesByDept(courses)
+  const out = {}
+  for (const [dept, list] of Object.entries(grouped)) {
+    out[dept] = list.map((c) => c.title)
+  }
+  return out
+}
+
+/** Filter criteria spec:
+ *    tags: string[]        - require ALL listed tags (case-insensitive)
+ *    anyTags: string[]     - require ANY of these tags (case-insensitive)
+ *    dept: string          - exact dept name
+ *    keyword: string       - search across title + description (case-insensitive) */
+export function filterCourses(courses, criteria = {}) {
+  const lc = (x) => String(x || '').toLowerCase()
+  const reqAll = (criteria.tags || []).map(lc)
+  const reqAny = (criteria.anyTags || []).map(lc)
+  const keyword = lc(criteria.keyword).trim()
+  const dept = criteria.dept || null
+
+  return courses.filter((c) => {
+    if (dept && c.dept !== dept) return false
+    const tagsLc = c.tags.map(lc)
+    for (const t of reqAll) if (!tagsLc.includes(t)) return false
+    if (reqAny.length > 0 && !reqAny.some((t) => tagsLc.includes(t))) return false
+    if (keyword) {
+      const hay = `${c.title} ${c.description}`.toLowerCase()
+      if (!hay.includes(keyword)) return false
+    }
+    return true
+  })
+}
+
+/** Parse a user question into a filter spec. Picks up tags, department, and
+ *  any significant remaining keyword. Used by the offline course handler and
+ *  echoed to Gemini for structured guidance. */
+export function parseCourseQuery(message, deptNames = []) {
+  const lower = String(message || '').toLowerCase()
+  const tags = []
+  const TAG_PHRASES = [
+    ['AP', /\b(ap|advanced\s+placement)\b/],
+    ['Honors', /\bhonors?\b/],
+    ['Dual Enrollment', /dual\s*enroll(?:ment)?|college\s+in\s+(?:the\s+)?high\s+school|\bhs\s+college\b/],
+    ['College', /\bcollege(?:\s+level)?\b/],
+    ['NCAA', /\bncaa\b/],
+    ['HACC', /\bhacc\b/],
+    ['Harrisburg University', /\bharrisburg\s+university\b|\bhu\b/],
+    ['Penn College', /\bpenn\s+college\b|\bpennsylvania\s+college\s+of\s+technology\b/],
+    ['Semester', /\bsemester(?:\s+only)?\b|\bhalf[\s-]year\b/],
+    ['Full Year', /\b(full[\s-]year|year[\s-]long|yearlong)\b/],
+    ['Summer Work', /\bsummer\s+(?:work|reading|assignment)s?\b/],
+  ]
+  for (const [tag, re] of TAG_PHRASES) {
+    if (re.test(lower)) tags.push(tag)
+  }
+
+  /** Ordered so more-specific depts (ESL, World Languages) match before
+   *  overlapping generic ones (English, Art, etc.). */
+  const deptKeywordOrder = [
+    ['English Language Development (ESL)', ['english language development', 'esl', 'ell', 'eld']],
+    ['World Languages', ['world language', 'world languages', 'foreign language', 'spanish', 'french', 'german', 'chinese', 'japanese']],
+    ['Cooperative Education', ['co-op', 'coop', 'cooperative education']],
+    ['Pathway Internships', ['internship', 'internships', 'pathway', 'pathways']],
+    ['Computer Science', ['computer science', 'compsci', 'programming', 'coding', 'it essentials']],
+    ['Engineering & Technology', ['engineering', 'drafting', 'woodworking', 'metal', 'robotics', 'drones', 'drone', 'graphic', 'cte ', ' cte', 'technical education', 'technology', 'carpentry']],
+    ['Health & Physical Education', ['physical education', 'phys ed', ' pe ', 'wellness', 'sports medicine', 'lifeguard', 'strength training', 'fitness']],
+    ['Business & Marketing', ['business', 'marketing', 'accounting', 'finance', 'entrepreneur']],
+    ['JROTC', ['jrotc', 'rotc']],
+    ['Library', ['library']],
+    ['Special Education', ['special education', 'special ed', 'life skills']],
+    ['Social Studies', ['social studies', 'history', 'government', 'economics', 'psychology', 'sociology', 'world religions', 'anthropology', 'civics']],
+    ['Music', ['music', 'band', 'choir', 'chorus', 'orchestra', 'jazz', 'ensemble', 'musicianship']],
+    ['Art', ['art ', ' art', 'drawing', 'painting', 'ceramic', 'ceramics', 'sculpture', 'animation', 'studio art', 'art studio']],
+    ['Science', ['science', 'biology', 'chemistry', 'physics', 'anatomy', 'meteorology', 'geology']],
+    ['Mathematics', ['math', 'mathematics', 'algebra', 'geometry', 'calculus', 'precalc', 'pre-calc', 'pre-calculus', 'precalculus', 'statistics', 'trigonometry']],
+    ['English', ['english', 'literature', 'composition', 'creative writing', 'broadcasting', 'journalism', 'language arts', 'speech']],
+  ]
+  let dept = null
+  const available = new Set(deptNames)
+  for (const [name, kws] of deptKeywordOrder) {
+    if (available.size > 0 && !available.has(name)) continue
+    if (kws.some((kw) => lower.includes(kw))) {
+      dept = name
+      break
+    }
+  }
+
+  return { tags, dept, rawLower: lower }
+}
+
+/** Does this question ask for a course list / catalog (broad or narrow)?
+ *  Deliberately permissive: any mention of a course tag (AP, honors, dual
+ *  enrollment, HACC, NCAA, semester/year-long), a course word (course, class,
+ *  elective, curriculum, catalog), or a "college X course/class" phrasing
+ *  is treated as a catalog query. The handler downstream gracefully shows a
+ *  helpful message if no courses match. */
 export function isCourseListQuestion(message) {
   const s = String(message || '').toLowerCase()
-  const asksCourses = /\b(course|courses|class|classes|elective|electives|offering|offerings|curriculum|catalog|subject|subjects)\b/.test(s)
-  const asksList = /\b(offer|offered|offering|offerings|available|list|what|which|all|every|every\s+class|take|taught|teach|teaching)\b/.test(s)
-  if (!asksCourses) return false
-  if (!asksList && !/\b(course list|course catalog|class list|courses offered|classes offered|all courses|all classes|every course|every class)\b/.test(s)) {
-    return false
-  }
-  return true
+  const tagWords = /\b(ap|advanced placement|honors?|dual enroll(?:ment)?|ncaa|hacc|harrisburg university|penn college|summer work|summer reading)\b/
+  const collegePhrase = /\bcollege\s+(?:course|class|courses|classes|level|credit|credits)\b|\bcollege\s+in\s+(?:the\s+)?high\s+school\b/
+  const scheduleWord = /\b(semester[-\s]?only|full[-\s]?year|year[-\s]?long|yearlong)\b/
+  const courseWords = /\b(course|courses|class|classes|elective|electives|offering|offerings|curriculum|catalog|subjects?|program|programs)\b/
+  const strong = /\b(course list|course catalog|class list|courses offered|classes offered|all courses|all classes|every course|every class)\b/
+
+  if (strong.test(s)) return true
+  if (courseWords.test(s)) return true
+  if (collegePhrase.test(s)) return true
+  if (tagWords.test(s)) return true
+  if (scheduleWord.test(s)) return true
+  return false
 }
 
 /** Canonical named sports users mention in questions. Shared by extractors. */
