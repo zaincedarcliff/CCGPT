@@ -7,6 +7,9 @@ import {
   detectNamedSport,
   extractLatestForSport,
   extractAPCourses,
+  extractCourseCatalog,
+  isCourseListQuestion,
+  COURSE_DEPARTMENTS,
 } from './schoolData.js'
 import { auth, logout, onAuthStateChanged, linkPasswordToCurrentUser } from './firebase.js'
 import Auth from './Auth.jsx'
@@ -108,6 +111,63 @@ async function getAIResponse(message) {
     if (apCourses.length > 0) {
       const bullets = apCourses.map((c) => `• ${c}`).join('\n')
       return `🎓 **AP Courses Offered at Cedar Cliff**\n\n${bullets}\n\nTalk to your counselor for prerequisites, summer work, and scheduling. Full details: https://www.wssd.k12.pa.us/AdvancedPlacementCourses.aspx`
+    }
+  }
+
+  const courseDeptKeywords = {
+    'Art': ['art', 'drawing', 'painting', 'ceramic', 'ceramics', 'sculpture', 'animation', 'studio'],
+    'Business & Marketing': ['business', 'marketing', 'accounting', 'finance', 'entrepreneur'],
+    'Computer Science': ['computer science', 'computers', 'programming', 'coding', 'cs ', 'compsci'],
+    'Engineering & Technology': ['engineering', 'technology', 'drafting', 'wood', 'woodworking', 'metal', 'robotics', 'drone', 'photo', 'graphic'],
+    'English': ['english', 'literature', 'writing', 'composition', 'language arts', 'broadcast', 'journalism'],
+    'English Language Development (ESL)': ['esl', 'ell', 'eld', 'english language development'],
+    'Health & Physical Education': ['health', 'phys ed', 'physical education', ' pe ', 'wellness', 'sports medicine', 'fitness', 'lifeguard'],
+    'JROTC': ['jrotc', 'rotc', 'military'],
+    'Library': ['library', 'media center'],
+    'Mathematics': ['math', 'mathematics', 'algebra', 'geometry', 'calculus', 'statistics', 'pre-calc', 'precalc'],
+    'Music': ['music', 'band', 'choir', 'chorus', 'orchestra', 'jazz', 'ensemble'],
+    'Science': ['science', 'biology', 'chemistry', 'physics', 'anatomy', 'environmental'],
+    'Social Studies': ['social studies', 'history', 'government', 'economics', 'psychology', 'sociology', 'world religions'],
+    'Special Education': ['special education', 'special ed', 'life skills'],
+    'World Languages': ['world language', 'world languages', 'spanish', 'french', 'german', 'chinese', 'foreign language'],
+    'Cooperative Education': ['co-op', 'coop', 'cooperative education'],
+    'Pathway Internships': ['internship', 'internships', 'pathway'],
+  }
+
+  const buildCourseListResponse = (catalog, dept, titles) => {
+    const bullets = titles.map((t) => `• ${t}`).join('\n')
+    return `📚 **${dept} Courses**\n\n${bullets}\n\nThis list is pulled from the West Shore School District curriculum guide. Prerequisites, credits, and weights vary — check with your counselor for scheduling.`
+  }
+
+  if (isCourseListQuestion(message)) {
+    const catalog = extractCourseCatalog(data)
+    const deptNames = Object.keys(catalog)
+
+    if (deptNames.length > 0) {
+      let matchedDept = null
+      for (const dept of deptNames) {
+        const kws = courseDeptKeywords[dept] || []
+        if (kws.some((kw) => lower.includes(kw))) {
+          matchedDept = dept
+          break
+        }
+      }
+
+      if (matchedDept) {
+        return buildCourseListResponse(catalog, matchedDept, catalog[matchedDept])
+      }
+
+      const total = Object.values(catalog).reduce((a, b) => a + b.length, 0)
+      const sections = COURSE_DEPARTMENTS
+        .map((d) => d.name)
+        .filter((name) => catalog[name] && catalog[name].length > 0)
+        .map((name) => {
+          const titles = catalog[name]
+          const bullets = titles.map((t) => `• ${t}`).join('\n')
+          return `### ${name} (${titles.length})\n${bullets}`
+        })
+        .join('\n\n')
+      return `📚 **Cedar Cliff Course Catalog** — ${total} courses across ${deptNames.length} departments.\n\n${sections}\n\nTip: ask me for a specific department (e.g. "What math courses are offered?" or "Science classes") for a shorter list. For the full official guide, see the West Shore School District curriculum pages.`
     }
   }
 

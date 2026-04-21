@@ -5,6 +5,8 @@ import {
   getRelevantEntries,
   getFallbackCurriculumEntries,
   formatEntriesForPrompt,
+  extractCourseCatalog,
+  isCourseListQuestion,
 } from './schoolData.js'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY
@@ -364,6 +366,17 @@ export async function askGemini(userText) {
   let systemInstruction = BASE_INSTRUCTION
   if (relevantInfo) {
     systemInstruction += `\n\n## Latest scraped school data (updated daily)\n**Supplementary context** scraped from official school/district pages. Use it when relevant, but **use Google Search** when the user needs fresher or fuller public information (e.g. athletics calendars, breaking news) or when this scrape looks incomplete or outdated.\n\n${relevantInfo}`
+  }
+
+  if (isCourseListQuestion(userText)) {
+    const catalog = extractCourseCatalog(data)
+    const deptSections = Object.entries(catalog)
+      .filter(([, titles]) => titles.length > 0)
+      .map(([dept, titles]) => `- **${dept}** (${titles.length}): ${titles.join('; ')}`)
+      .join('\n')
+    if (deptSections) {
+      systemInstruction += `\n\n## Cedar Cliff course catalog (structured)\nThe user is asking about courses/classes offered. Below is the authoritative list of Cedar Cliff courses grouped by department, extracted from the West Shore School District curriculum pages. When answering, **format your reply as a clean bulleted list grouped by department** (not prose paragraphs). If the user asked about one department, return only that department's courses.\n\n${deptSections}`
+    }
   }
   if (wantsLiveSportsAnswer(userText)) {
     systemInstruction += `\n\n## Priority for this message\nThe user asked about sports games, schedules, or scores. **Use Google Search grounding** to answer with current information. Do not rely on older announcement snippets alone for a full schedule — confirm against search when possible. If scraped lines conflict with search, prefer search for dates and scores.`

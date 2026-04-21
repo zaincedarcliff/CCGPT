@@ -480,6 +480,132 @@ export function extractAPCourses(allData) {
   return [...found.values()].sort((a, b) => a.localeCompare(b))
 }
 
+/** Map of course-catalog source URLs → human-friendly department names. */
+export const COURSE_DEPARTMENTS = [
+  { match: 'Art.aspx', name: 'Art' },
+  { match: 'BusinessandMarketing', name: 'Business & Marketing' },
+  { match: 'ComputerScience', name: 'Computer Science' },
+  { match: 'EngineeringandTechnology', name: 'Engineering & Technology' },
+  { match: 'English.aspx', name: 'English' },
+  { match: 'EnglishLanguageDev', name: 'English Language Development (ESL)' },
+  { match: 'HealthPhysicalEd', name: 'Health & Physical Education' },
+  { match: 'JuniorReserveOfficersTrainingCorps', name: 'JROTC' },
+  { match: 'Library.aspx', name: 'Library' },
+  { match: 'Mathematics', name: 'Mathematics' },
+  { match: 'Music.aspx', name: 'Music' },
+  { match: 'Science.aspx', name: 'Science' },
+  { match: 'SocialStudies', name: 'Social Studies' },
+  { match: 'SpecialEducation', name: 'Special Education' },
+  { match: 'WorldLanguages', name: 'World Languages' },
+  { match: 'CooperativeEducation', name: 'Cooperative Education' },
+  { match: 'PathwayInternships', name: 'Pathway Internships' },
+]
+
+function departmentForSource(src) {
+  if (!src) return null
+  for (const d of COURSE_DEPARTMENTS) {
+    if (String(src).includes(d.match)) return d.name
+  }
+  return null
+}
+
+/** Prettify an all-caps course title from the catalog into "Sentence Case"
+ *  while preserving common acronyms, roman numerals, and joiner words. */
+function prettifyCourseTitle(raw) {
+  let s = String(raw).replace(/\s+/g, ' ').trim()
+  s = s.replace(/\s+&\s+/g, ' & ')
+  s = s.replace(/\s*,\s*/g, ', ')
+
+  const keepUpper = new Set([
+    'AP', 'AB', 'BC', 'US', 'USA', 'JROTC', 'ROTC', 'HACC', 'CCHS',
+    'IT', 'PC', 'DIY', 'CAD', 'FBLA', 'DECA', 'HU', 'DNA', 'TV', 'ELD', 'ESL',
+    'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+    'IA', 'IB', 'IIA', 'IIB',
+  ])
+  const keepLower = new Set(['and', 'or', 'of', 'the', 'a', 'an', 'to', 'in', 'for', 'on', 'with'])
+
+  const words = s.split(' ')
+  const out = words.map((w, i) => {
+    if (!w) return w
+    const stripped = w.replace(/[^A-Za-z0-9&/]/g, '')
+    const upper = stripped.toUpperCase()
+    if (keepUpper.has(upper)) {
+      return w.replace(stripped, upper)
+    }
+    if (i > 0 && keepLower.has(upper.toLowerCase())) {
+      return w.toLowerCase()
+    }
+    const letters = w.replace(/[^A-Za-z]/g, '')
+    const isAllCaps = letters.length > 0 && letters === letters.toUpperCase()
+    if (isAllCaps) {
+      return w.replace(/([A-Za-z])([A-Za-z]*)/g, (_, a, b) => a.toUpperCase() + b.toLowerCase())
+    }
+    return w
+  })
+  return out.join(' ').replace(/\s+/g, ' ').trim()
+}
+
+/** Pulls every course title from WSSD curriculum pages, grouped by department.
+ *  Course lines in the scrape follow the pattern:
+ *    "<TITLE IN CAPS><6+ digit code>[.5|1] Credit(s) ... Weight..."
+ *  Returns a map: { [deptName]: string[] of prettified titles, sorted } */
+export function extractCourseCatalog(allData) {
+  const catalog = {}
+  if (!allData || allData.length === 0) return catalog
+
+  const rawByDept = {}
+  for (const entry of allData) {
+    const dept = departmentForSource(entry.source)
+    if (!dept) continue
+    const seenTitles = (rawByDept[dept] ||= new Map())
+    for (const raw of entry.content || []) {
+      const s = String(raw).replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, ' ')
+      const courseRe = /([A-Z][A-Z0-9 \-&',/:()\.]{2,90}?)(\d{6,})(?:\s*\.?\s*\d+)?\s*Credits?\b/g
+      let m
+      while ((m = courseRe.exec(s)) !== null) {
+        let title = m[1].replace(/\s+/g, ' ').trim()
+
+        // Common scrape artifact: title ending in "LEVEL" loses its trailing
+        // level number to the course code. Steal the first digit back.
+        if (/\bLEVEL$/.test(title) && /^\d/.test(m[2])) {
+          title = `${title} ${m[2].slice(0, 1)}`
+        }
+
+        // Drop trailing stray punctuation / hanging connector words.
+        title = title.replace(/[\s\-–:,]+$/, '').trim()
+        title = title.replace(/\s+\-\s+$/, '').trim()
+
+        if (title.length < 4) continue
+        if (/^LEVEL\b/.test(title)) continue
+        if (/^(THE|A|AN|AND|OR|OF|IN|ON|FOR|WITH|TO)\b/.test(title)) continue
+
+        const pretty = prettifyCourseTitle(title)
+        const key = pretty.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+        if (!key || seenTitles.has(key)) continue
+        seenTitles.set(key, pretty)
+      }
+    }
+  }
+
+  for (const dept of Object.keys(rawByDept)) {
+    const titles = [...rawByDept[dept].values()].sort((a, b) => a.localeCompare(b))
+    if (titles.length > 0) catalog[dept] = titles
+  }
+  return catalog
+}
+
+/** Does this question ask for a course list / catalog? */
+export function isCourseListQuestion(message) {
+  const s = String(message || '').toLowerCase()
+  const asksCourses = /\b(course|courses|class|classes|elective|electives|offering|offerings|curriculum|catalog|subject|subjects)\b/.test(s)
+  const asksList = /\b(offer|offered|offering|offerings|available|list|what|which|all|every|every\s+class|take|taught|teach|teaching)\b/.test(s)
+  if (!asksCourses) return false
+  if (!asksList && !/\b(course list|course catalog|class list|courses offered|classes offered|all courses|all classes|every course|every class)\b/.test(s)) {
+    return false
+  }
+  return true
+}
+
 /** Canonical named sports users mention in questions. Shared by extractors. */
 export const NAMED_SPORTS = [
   'basketball', 'football', 'soccer', 'baseball', 'softball', 'lacrosse',
