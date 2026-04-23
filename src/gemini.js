@@ -398,40 +398,91 @@ export async function askGemini(userText) {
   const tools = googleSearchTools()
   const contents = augmentUserMessageForSearch(userText)
 
-  let response
-  try {
-    response = await ai.models.generateContent({
+  const callModel = (useTools) =>
+    ai.models.generateContent({
       model: modelName,
       contents,
       config: {
         systemInstruction,
-        ...(tools ? { tools } : {}),
+        ...(useTools && tools ? { tools } : {}),
       },
     })
+
+  let response
+  let usedTools = Boolean(tools)
+  try {
+    response = await callModel(true)
   } catch (err) {
-    // Fall back without tools if the model/region rejects Google Search grounding.
     const msg = String(err?.message || '')
     const looksLikeToolError =
       /tool|googleSearch|google_search|grounding|unsupported/i.test(msg) ||
       err?.status === 400
     if (tools && looksLikeToolError) {
       console.warn('[gemini] googleSearch tool rejected, retrying without it:', msg)
-      response = await ai.models.generateContent({
-        model: modelName,
-        contents,
-        config: { systemInstruction },
-      })
+      usedTools = false
+      response = await callModel(false)
     } else {
       throw err
     }
   }
 
-  let text = response?.text
-  if (!text || !String(text).trim()) {
+  let text = extractResponseText(response)
+
+  // If the grounded call came back empty (safety filter hiccup, grounding returned
+  // citations only, MAX_TOKENS with no text yet, etc.) retry once without tools.
+  if (!text && usedTools) {
+    console.warn(
+      '[gemini] empty response with tools enabled — retrying without googleSearch. finishReason=',
+      response?.candidates?.[0]?.finishReason,
+    )
+    try {
+      response = await callModel(false)
+      usedTools = false
+      text = extractResponseText(response)
+    } catch (err) {
+      console.warn('[gemini] retry without tools failed:', err?.message || err)
+    }
+  }
+
+  if (!text) {
+    const reason = response?.candidates?.[0]?.finishReason
+    const promptBlock = response?.promptFeedback?.blockReason
+    console.warn('[gemini] empty response. finishReason=', reason, 'promptBlock=', promptBlock, response)
+    if (reason === 'SAFETY' || promptBlock === 'SAFETY') {
+      return "I can't answer that one — it was blocked by Gemini's safety filter. Try rephrasing, or ask me something about Cedar Cliff (sports, clubs, counselors, schedule, etc.)."
+    }
+    if (reason === 'RECITATION') {
+      return "Gemini didn't return an answer for that (blocked for recitation). Try asking it a different way, or ask me about something else at Cedar Cliff."
+    }
+    if (reason === 'MAX_TOKENS') {
+      return "That answer got cut off before Gemini finished. Try asking a narrower question (e.g. one sport, one counselor, one topic at a time)."
+    }
     throw new Error('Empty response from Gemini')
   }
+
   text = stripSourcesFooter(String(text).trim())
   return text
+}
+
+/** Pull text out of a Gemini response. `response.text` is the convenience path,
+ *  but if it's missing (tools-only turn, partial parts, etc.) fall back to
+ *  walking candidates[].content.parts[].text so we don't throw on valid answers. */
+function extractResponseText(response) {
+  if (!response) return ''
+  const direct = typeof response.text === 'string' ? response.text : ''
+  if (direct.trim()) return direct.trim()
+  const candidates = Array.isArray(response.candidates) ? response.candidates : []
+  for (const cand of candidates) {
+    const parts = cand?.content?.parts
+    if (!Array.isArray(parts)) continue
+    const joined = parts
+      .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+      .filter(Boolean)
+      .join('')
+      .trim()
+    if (joined) return joined
+  }
+  return ''
 }
 
 /** Remove any "Sources / Source / References / Citations" trailer + trailing bare URLs
