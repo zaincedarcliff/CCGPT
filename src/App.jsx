@@ -295,8 +295,12 @@ function App() {
   const [linkErr, setLinkErr] = useState('')
   const [linkBusy, setLinkBusy] = useState(false)
   const [theme, setTheme] = useState(getInitialTheme)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+
+  const closeSidebar = useCallback(() => setIsSidebarOpen(false), [])
+  const toggleSidebar = useCallback(() => setIsSidebarOpen((v) => !v), [])
 
   useEffect(() => { applyTheme(theme) }, [theme])
 
@@ -328,7 +332,13 @@ function App() {
     setActiveId(null)
     setInputValue('')
     setIsTyping(false)
+    setIsSidebarOpen(false)
     inputRef.current?.focus()
+  }, [])
+
+  const selectConversation = useCallback((id) => {
+    setActiveId(id)
+    setIsSidebarOpen(false)
   }, [])
 
   const sendMessage = useCallback(
@@ -444,8 +454,14 @@ function App() {
   const showWelcome = messages.length === 0
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell${isSidebarOpen ? ' app-shell--sidebar-open' : ''}`}>
+      <button
+        type="button"
+        className="sidebar-backdrop"
+        aria-label="Close chat history"
+        onClick={closeSidebar}
+      />
+      <aside className={`sidebar${isSidebarOpen ? ' sidebar--open' : ''}`}>
         <button className="sidebar__brand" type="button" onClick={startNewChat}>
           <img
             alt="Cedar Cliff logo"
@@ -465,7 +481,7 @@ function App() {
               className={`history-item${c.id === activeId ? ' history-item--active' : ''}`}
               key={c.id}
               type="button"
-              onClick={() => setActiveId(c.id)}
+              onClick={() => selectConversation(c.id)}
               title={c.title}
             >
               <span className="history-item__icon">💬</span>
@@ -488,6 +504,17 @@ function App() {
       <div className="main-panel">
         <header className="topbar">
           <div className="topbar__title">
+            <button
+              type="button"
+              className="sidebar-toggle"
+              aria-label={isSidebarOpen ? 'Close chat history' : 'Open chat history'}
+              aria-expanded={isSidebarOpen}
+              onClick={toggleSidebar}
+            >
+              <span className="sidebar-toggle__bar" aria-hidden="true" />
+              <span className="sidebar-toggle__bar" aria-hidden="true" />
+              <span className="sidebar-toggle__bar" aria-hidden="true" />
+            </button>
             <img
               alt="Cedar Cliff logo"
               className="brand-mark brand-mark--tiny brand-mark__image brand-mark__image--tiny"
