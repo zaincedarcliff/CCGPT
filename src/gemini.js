@@ -160,6 +160,7 @@ If you are unsure whether a request is graded work, **treat it as graded work an
 - **Emojis**: only if the user used one first, or for a natural match (🏀 for basketball, 🎓 for graduation). Don't sprinkle.
 - **Match length to question.** One-line question → one-line answer. Broad question → a few short sentences.
 - **Do NOT list sources, citations, URLs, or "Source:" lines in your reply.** Just answer the question — do not print the URLs you searched. (The app hides them on purpose.)
+- **Do NOT leave placeholder or meta notes in the reply**, e.g. do NOT write "[Relevant URL was omitted as per instruction.]", "[Source omitted]", "Note: URL hidden", or anything similar. Just omit the URL silently and move on.
 - **Never** pad the answer with "I hope this helps!" / "Feel free to ask…" / "As an AI…". Just answer.
 
 ## Content guidelines
@@ -495,5 +496,19 @@ function stripSourcesFooter(text) {
     '',
   )
   out = out.replace(/(?:\n[^\n]*https?:\/\/\S+[^\n]*)+\s*$/g, '')
+  out = stripMetaNotes(out)
   return out.trimEnd()
+}
+
+/** Strip any bracketed/parenthetical meta-notes the model sometimes leaks, e.g.
+ *  "[Relevant URL was omitted as per instruction.]" or "(Source URL omitted.)".
+ *  These are never meant for the user. */
+function stripMetaNotes(text) {
+  if (!text) return text
+  const metaRe =
+    /\s*[[({]\s*(?:relevant\s+)?(?:url|urls|source|sources|link|links|citation|citations|reference|references)\b[^\])}]*?(?:omitted|hidden|removed|not\s+shown|per\s+instruction|as\s+per\s+instruction|as\s+instructed)[^\])}]*[\])}]\s*/gi
+  let out = text.replace(metaRe, ' ')
+  out = out.replace(/^[ \t]*(?:note|n\.b\.)\s*:.*$/gim, '')
+  out = out.replace(/\n{3,}/g, '\n\n')
+  return out.trim()
 }
