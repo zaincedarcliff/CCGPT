@@ -365,16 +365,27 @@ export function formatGeminiClientError(err) {
   } catch {
     /* message may not be JSON */
   }
-  const blob = `${apiMessage} ${raw}`.toLowerCase()
-  if (code === 429 || raw.includes('429') || raw.includes('RESOURCE_EXHAUSTED')) {
-    if (/prepayment|credits are depleted|depleted|billing/.test(blob)) {
+  const is429 =
+    code === 429 || raw.includes('429') || raw.includes('RESOURCE_EXHAUSTED')
+  // Only treat as prepay-wallet empty when Google says so — not every 429 mentions "billing".
+  const isPrepayCreditsDepleted =
+    /prepayment credits are depleted|prepaid credits|prepayment credits/i.test(
+      `${apiMessage} ${raw}`,
+    )
+  if (is429) {
+    if (isPrepayCreditsDepleted) {
       return [
-        '**Gemini billing:** prepaid credits for this API key’s Google AI project are used up.',
-        'Open https://aistudio.google.com/ → the project tied to this key → Billing / usage, add credits or a payment method, then try again.',
-        'Until that’s fixed, live AI and web search will keep failing with quota errors.',
+        '**Gemini billing:** Google says **prepayment credits** for this API key’s project are used up.',
+        'A **new API key in the same project** still uses that same balance — it does not reset credits.',
+        'Open https://aistudio.google.com/ → **API keys** → note the **project** → **Billing / usage** and add prepay or link Cloud billing. Or create a **new project** with its own funded billing.',
+        'If production (e.g. Vercel) still fails locally works: set **VITE_GEMINI_API_KEY** there and redeploy.',
       ].join('\n\n')
     }
-    return 'The AI service is rate-limited or busy right now (429). Wait a minute and try again.'
+    const detail = apiMessage.trim() || raw.slice(0, 500)
+    return [
+      'The AI service returned a quota / rate limit error (429).',
+      detail ? `**From Google:** ${detail}` : 'Wait a minute and try again, or check AI Studio → Usage for this key’s project.',
+    ].join('\n\n')
   }
   if (code === 403 || raw.includes('PERMISSION_DENIED')) {
     return 'The API key was rejected (permission). Check that it is valid and that the Generative Language API is enabled for its project.'
