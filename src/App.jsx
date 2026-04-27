@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import cedarCliffLogo from './assets/cedar-cliff-logo.png'
-import { askGemini, isGeminiConfigured, isHomeworkHelpRequest, HOMEWORK_REFUSAL_MESSAGE } from './gemini.js'
+import {
+  askGemini,
+  isGeminiConfigured,
+  isHomeworkHelpRequest,
+  HOMEWORK_REFUSAL_MESSAGE,
+  formatGeminiClientError,
+} from './gemini.js'
 import {
   loadSchoolData,
   extractRelevantSnippets,
@@ -374,7 +380,7 @@ function App() {
             aiText = await askGemini(trimmed)
           } catch (err) {
             console.error('Gemini error:', err)
-            aiText = `Sorry, I couldn't reach the AI service right now. Error: ${err.message}\n\nPlease try again in a moment, or check the browser console for details.`
+            aiText = formatGeminiClientError(err)
           }
         } else {
           try {

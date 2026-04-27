@@ -350,6 +350,39 @@ export function isGeminiConfigured() {
 }
 
 /**
+ * Turn SDK/API errors into a short chat message (avoids dumping raw JSON).
+ * @param {unknown} err
+ * @returns {string}
+ */
+export function formatGeminiClientError(err) {
+  const raw = String(err?.message ?? err ?? '')
+  let code
+  let apiMessage = ''
+  try {
+    const j = JSON.parse(raw)
+    code = j?.error?.code
+    apiMessage = String(j?.error?.message ?? '')
+  } catch {
+    /* message may not be JSON */
+  }
+  const blob = `${apiMessage} ${raw}`.toLowerCase()
+  if (code === 429 || raw.includes('429') || raw.includes('RESOURCE_EXHAUSTED')) {
+    if (/prepayment|credits are depleted|depleted|billing/.test(blob)) {
+      return [
+        '**Gemini billing:** prepaid credits for this API key’s Google AI project are used up.',
+        'Open https://aistudio.google.com/ → the project tied to this key → Billing / usage, add credits or a payment method, then try again.',
+        'Until that’s fixed, live AI and web search will keep failing with quota errors.',
+      ].join('\n\n')
+    }
+    return 'The AI service is rate-limited or busy right now (429). Wait a minute and try again.'
+  }
+  if (code === 403 || raw.includes('PERMISSION_DENIED')) {
+    return 'The API key was rejected (permission). Check that it is valid and that the Generative Language API is enabled for its project.'
+  }
+  return `Sorry, I couldn't reach the AI service.\n\n${raw}`
+}
+
+/**
  * @param {string} userText
  * @returns {Promise<string>}
  */
