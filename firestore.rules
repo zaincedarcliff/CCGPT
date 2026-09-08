@@ -1,0 +1,19 @@
+rules_version = '2';
+
+// Deploy: Firebase console → Firestore Database → Rules → paste → Publish
+// (or `firebase deploy --only firestore:rules` if you use the Firebase CLI).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Long-term chat memory. Document id == the owner's Firebase Auth uid.
+    // A signed-in user can only read/write their OWN document — no cross-account access.
+    match /userMemory/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Everything else is locked down.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

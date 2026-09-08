@@ -354,8 +354,36 @@ export function isGeminiConfigured() {
  * @param {unknown} err
  * @returns {string}
  */
+function messageForEmptyModelReply(reason, promptBlock) {
+  if (reason === 'SAFETY' || promptBlock === 'SAFETY') {
+    return "I can't answer that one — it was blocked by a safety filter. Try rephrasing, or ask me something about Cedar Cliff (sports, clubs, counselors, schedule, etc.)."
+  }
+  if (
+    reason === 'RECITATION' ||
+    reason === 'BLOCKLIST' ||
+    reason === 'PROHIBITED_CONTENT' ||
+    promptBlock === 'BLOCKLIST' ||
+    promptBlock === 'PROHIBITED_CONTENT'
+  ) {
+    return "I couldn't return an answer for that. Try asking it a different way, or ask me about something else at Cedar Cliff."
+  }
+  if (reason === 'MAX_TOKENS') {
+    return 'That answer got cut off before it finished. Try asking a narrower question (e.g. one sport, one counselor, one topic at a time).'
+  }
+  if (reason === 'MALFORMED_FUNCTION_CALL' || reason === 'OTHER') {
+    return "I didn't get a usable answer that time. Please try again in a moment, or rephrase your question."
+  }
+  return "I didn't get a usable answer that time. Please try again, or ask a narrower Cedar Cliff question."
+}
+
 export function formatGeminiClientError(err) {
   const raw = String(err?.message ?? err ?? '')
+  if (/empty response/i.test(raw)) {
+    return messageForEmptyModelReply(undefined, undefined)
+  }
+  if (/not configured/i.test(raw)) {
+    return 'The AI service is not configured. Add VITE_GEMINI_API_KEY in Vercel and redeploy.'
+  }
   let code
   let apiMessage = ''
   try {
@@ -375,31 +403,35 @@ export function formatGeminiClientError(err) {
   if (is429) {
     if (isPrepayCreditsDepleted) {
       return [
-        '**Gemini billing:** Google says **prepayment credits** for this API key’s project are used up.',
+        '**AI billing:** Prepayment credits for this API key’s project are used up.',
         'A **new API key in the same project** still uses that same balance — it does not reset credits.',
         'Open https://aistudio.google.com/ → **API keys** → note the **project** → **Billing / usage** and add prepay or link Cloud billing. Or create a **new project** with its own funded billing.',
-        'If production (e.g. Vercel) still fails locally works: set **VITE_GEMINI_API_KEY** there and redeploy.',
+        'If production (e.g. Vercel) still fails after local works: set **VITE_GEMINI_API_KEY** there and redeploy.',
       ].join('\n\n')
     }
-    const detail = apiMessage.trim() || raw.slice(0, 500)
     return [
-      'The AI service returned a quota / rate limit error (429).',
-      detail ? `**From Google:** ${detail}` : 'Wait a minute and try again, or check AI Studio → Usage for this key’s project.',
+      'The AI service hit a quota or rate limit. Wait a minute and try again, or check usage for this API key’s project.',
     ].join('\n\n')
   }
   if (code === 403 || raw.includes('PERMISSION_DENIED')) {
-    return 'The API key was rejected (permission). Check that it is valid and that the Generative Language API is enabled for its project.'
+    return 'The API key was rejected. Check that it is valid and that the Generative Language API is enabled for its project.'
   }
-  return `Sorry, I couldn't reach the AI service.\n\n${raw}`
+  if (code === 503 || raw.includes('UNAVAILABLE') || /high demand/i.test(raw)) {
+    return 'The AI service is busy right now. Please try again in a moment.'
+  }
+  return "Sorry, I couldn't reach the AI service. Please try again in a moment."
 }
 
 /**
  * @param {string} userText
+ * @param {{ memoryBlock?: string }} [options]
+ *   memoryBlock — pre-formatted "what we know about this student" text (see src/memory.js).
+ *   It is scoped to the signed-in account by the caller; never pass another user's memory.
  * @returns {Promise<string>}
  */
-export async function askGemini(userText) {
+export async function askGemini(userText, options = {}) {
   if (!isGeminiConfigured()) {
-    throw new Error('Gemini not configured — add VITE_GEMINI_API_KEY to .env.local')
+    throw new Error('AI not configured — add VITE_GEMINI_API_KEY to .env.local')
   }
 
   if (isHomeworkHelpRequest(userText)) {
@@ -410,6 +442,10 @@ export async function askGemini(userText) {
   const relevantInfo = getRelevantData(userText, data)
 
   let systemInstruction = BASE_INSTRUCTION
+  const memoryBlock = String(options?.memoryBlock || '').trim()
+  if (memoryBlock) {
+    systemInstruction += `\n\n${memoryBlock}`
+  }
   if (relevantInfo) {
     systemInstruction += `\n\n## Latest scraped school data (updated daily)\n**Supplementary context** scraped from official school/district pages. Use it when relevant, but **use Google Search** when the user needs fresher or fuller public information (e.g. athletics calendars, breaking news) or when this scrape looks incomplete or outdated.\n\n${relevantInfo}`
   }
@@ -442,6 +478,7 @@ export async function askGemini(userText) {
   const ai = new GoogleGenAI({ apiKey: String(apiKey).trim() })
   const tools = googleSearchTools()
   const contents = augmentUserMessageForSearch(userText)
+  const usesThinkingModel = /gemini-2\.5|gemini-3/i.test(modelName)
 
   const callModel = (useTools) =>
     ai.models.generateContent({
@@ -449,6 +486,11 @@ export async function askGemini(userText) {
       contents,
       config: {
         systemInstruction,
+        maxOutputTokens: 8192,
+        // 2.5 Flash defaults to dynamic thinking; disable so replies keep real answer text.
+        ...(usesThinkingModel
+          ? { thinkingConfig: { thinkingBudget: 0 } }
+          : {}),
         ...(useTools && tools ? { tools } : {}),
       },
     })
@@ -471,6 +513,8 @@ export async function askGemini(userText) {
     }
   }
 
+  let firstReason = response?.candidates?.[0]?.finishReason
+  let firstPromptBlock = response?.promptFeedback?.blockReason
   let text = extractResponseText(response)
 
   // If the grounded call came back empty (safety filter hiccup, grounding returned
@@ -478,50 +522,130 @@ export async function askGemini(userText) {
   if (!text && usedTools) {
     console.warn(
       '[gemini] empty response with tools enabled — retrying without googleSearch. finishReason=',
-      response?.candidates?.[0]?.finishReason,
+      firstReason,
     )
     try {
-      response = await callModel(false)
+      const retryResponse = await callModel(false)
       usedTools = false
-      text = extractResponseText(response)
+      const retryText = extractResponseText(retryResponse)
+      if (retryText) {
+        response = retryResponse
+        text = retryText
+      } else {
+        // Keep the first finish/block reason when retry is also empty.
+        const retryReason = retryResponse?.candidates?.[0]?.finishReason
+        const retryBlock = retryResponse?.promptFeedback?.blockReason
+        if (!firstReason && retryReason) firstReason = retryReason
+        if (!firstPromptBlock && retryBlock) firstPromptBlock = retryBlock
+        response = retryResponse
+      }
     } catch (err) {
       console.warn('[gemini] retry without tools failed:', err?.message || err)
     }
   }
 
   if (!text) {
-    const reason = response?.candidates?.[0]?.finishReason
-    const promptBlock = response?.promptFeedback?.blockReason
+    // Prefer the first call's finish/block reason — retry often returns a less useful one.
+    const reason = firstReason || response?.candidates?.[0]?.finishReason
+    const promptBlock = firstPromptBlock || response?.promptFeedback?.blockReason
     console.warn('[gemini] empty response. finishReason=', reason, 'promptBlock=', promptBlock, response)
-    if (reason === 'SAFETY' || promptBlock === 'SAFETY') {
-      return "I can't answer that one — it was blocked by Gemini's safety filter. Try rephrasing, or ask me something about Cedar Cliff (sports, clubs, counselors, schedule, etc.)."
-    }
-    if (reason === 'RECITATION') {
-      return "Gemini didn't return an answer for that (blocked for recitation). Try asking it a different way, or ask me about something else at Cedar Cliff."
-    }
-    if (reason === 'MAX_TOKENS') {
-      return "That answer got cut off before Gemini finished. Try asking a narrower question (e.g. one sport, one counselor, one topic at a time)."
-    }
-    throw new Error('Empty response from Gemini')
+    return messageForEmptyModelReply(reason, promptBlock)
   }
 
   text = stripSourcesFooter(String(text).trim())
   return text
 }
 
-/** Pull text out of a Gemini response. `response.text` is the convenience path,
+/**
+ * Ask the model to pull durable facts about the user out of one exchange.
+ * Returns `{ add: string[], remove: string[] }` — `remove` lists existing facts that the
+ * new message contradicts or asks to forget. Never throws; returns empty lists on failure.
+ *
+ * @param {string} userText
+ * @param {string} assistantText
+ * @param {string[]} existingFacts
+ */
+export async function extractMemoryFacts(userText, assistantText, existingFacts = []) {
+  const empty = { add: [], remove: [] }
+  if (!isGeminiConfigured()) return empty
+  const user = String(userText || '').trim()
+  if (!user) return empty
+
+  const existing = existingFacts.length
+    ? existingFacts.map((f, i) => `${i + 1}. ${f}`).join('\n')
+    : '(none yet)'
+
+  const instruction = [
+    'You maintain a short long-term memory about ONE student who uses a school assistant.',
+    'From the latest exchange, extract durable facts the USER stated about THEMSELVES.',
+    '',
+    'Keep: name / what to call them, grade or graduation year, sports, clubs, activities, classes or teachers they mention taking, counselor, interests, goals, how they like answers (short, detailed, etc.).',
+    'Skip: one-off questions, temporary things (tonight\'s homework, "I\'m tired"), anything the ASSISTANT said, facts about other people, and sensitive data (health, address, phone, passwords, grades/scores, family details).',
+    'If the user asks to forget or correct something, put the old fact text in "remove".',
+    'Each fact: one short sentence, third person, under 120 characters, e.g. "Is a junior (class of 2027)." or "Plays varsity soccer."',
+    'Do not repeat facts already in the list unless updating them (then add the new one and remove the old one).',
+    '',
+    'Respond with ONLY JSON: {"add": string[], "remove": string[]}. Use empty arrays when nothing applies.',
+  ].join('\n')
+
+  const prompt = [
+    `## Existing facts\n${existing}`,
+    `## Latest user message\n${user.slice(0, 2000)}`,
+    `## Assistant reply (context only — do not extract facts from it)\n${String(assistantText || '').slice(0, 1200)}`,
+  ].join('\n\n')
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: String(apiKey).trim() })
+    const usesThinkingModel = /gemini-2\.5|gemini-3/i.test(modelName)
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: prompt,
+      config: {
+        systemInstruction: instruction,
+        responseMimeType: 'application/json',
+        maxOutputTokens: 512,
+        temperature: 0.1,
+        ...(usesThinkingModel ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+      },
+    })
+    const raw = extractResponseText(response)
+    if (!raw) return empty
+    const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+    const parsed = JSON.parse(jsonText)
+    const clean = (arr) =>
+      Array.isArray(arr)
+        ? arr
+            .map((s) => String(s || '').trim())
+            .filter((s) => s && s.length <= 160)
+            .slice(0, 8)
+        : []
+    return { add: clean(parsed?.add), remove: clean(parsed?.remove) }
+  } catch (err) {
+    console.warn('[memory] fact extraction failed:', err?.message || err)
+    return empty
+  }
+}
+
+/** Pull text out of a model response. `response.text` is the convenience path,
  *  but if it's missing (tools-only turn, partial parts, etc.) fall back to
  *  walking candidates[].content.parts[].text so we don't throw on valid answers. */
 function extractResponseText(response) {
   if (!response) return ''
-  const direct = typeof response.text === 'string' ? response.text : ''
-  if (direct.trim()) return direct.trim()
+  try {
+    const direct = typeof response.text === 'string' ? response.text : ''
+    if (direct.trim()) return direct.trim()
+  } catch {
+    /* SDK getter can throw when there are no text parts */
+  }
   const candidates = Array.isArray(response.candidates) ? response.candidates : []
   for (const cand of candidates) {
     const parts = cand?.content?.parts
     if (!Array.isArray(parts)) continue
     const joined = parts
-      .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+      .map((p) => {
+        if (p?.thought) return ''
+        return typeof p?.text === 'string' ? p.text : ''
+      })
       .filter(Boolean)
       .join('')
       .trim()

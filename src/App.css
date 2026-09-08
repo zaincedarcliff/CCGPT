@@ -337,6 +337,113 @@
   background: var(--danger-bg);
 }
 
+/* ── Per-account memory panel ── */
+.memory-panel {
+  flex-shrink: 0;
+  padding: 12px 16px 14px;
+  background: var(--banner-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.memory-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.memory-panel__title {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dark);
+}
+
+.memory-panel__copy,
+.memory-panel__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.memory-panel__empty {
+  margin-top: 8px;
+}
+
+.memory-panel__close {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.memory-panel__list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.memory-panel__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-dark);
+}
+
+.memory-panel__forget,
+.memory-panel__clear {
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.memory-panel__forget:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.memory-panel__clear {
+  margin-top: 10px;
+  color: var(--danger);
+  border-color: var(--danger-border);
+}
+
+.memory-panel__clear:hover {
+  background: var(--danger-bg);
+}
+
+.memory-panel__forget:disabled,
+.memory-panel__clear:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* ── Link password (Google-only accounts) ── */
 .account-link-banner {
   flex-shrink: 0;

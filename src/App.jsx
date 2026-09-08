@@ -21,6 +21,15 @@ import {
   COURSE_DEPARTMENTS,
 } from './schoolData.js'
 import { auth, logout, onAuthStateChanged, linkPasswordToCurrentUser } from './firebase.js'
+import {
+  resetMemoryCache,
+  loadUserMemory,
+  getMemoryPromptBlock,
+  handleMemoryCommand,
+  rememberFromExchange,
+  clearUserMemory,
+  forgetFact,
+} from './memory.js'
 import Auth from './Auth.jsx'
 import './App.css'
 
@@ -302,6 +311,9 @@ function App() {
   const [linkBusy, setLinkBusy] = useState(false)
   const [theme, setTheme] = useState(getInitialTheme)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [showMemory, setShowMemory] = useState(false)
+  const [memoryFacts, setMemoryFacts] = useState([])
+  const [memoryBusy, setMemoryBusy] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -316,12 +328,56 @@ function App() {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
+      // Account changed (sign-in, sign-out, or switch): drop anything cached for the
+      // previous account so memory never leaks between users.
+      resetMemoryCache()
+      setMemoryFacts([])
+      setShowMemory(false)
       setUser(u ?? null)
       setConversations(loadConversations(u?.uid))
       setActiveId(null)
     })
     return unsub
   }, [])
+
+  const refreshMemoryFacts = useCallback(async () => {
+    if (!user?.uid) return
+    setMemoryBusy(true)
+    try {
+      setMemoryFacts(await loadUserMemory(user.uid))
+    } finally {
+      setMemoryBusy(false)
+    }
+  }, [user])
+
+  const toggleMemoryPanel = useCallback(() => {
+    setShowMemory((open) => {
+      if (!open) void refreshMemoryFacts()
+      return !open
+    })
+  }, [refreshMemoryFacts])
+
+  const onForgetFact = async (fact) => {
+    if (!user?.uid) return
+    setMemoryBusy(true)
+    try {
+      setMemoryFacts(await forgetFact(user.uid, fact))
+    } finally {
+      setMemoryBusy(false)
+    }
+  }
+
+  const onClearMemory = async () => {
+    if (!user?.uid) return
+    if (!window.confirm('Forget everything CCGPT has learned about you? This cannot be undone.')) return
+    setMemoryBusy(true)
+    try {
+      await clearUserMemory(user.uid)
+      setMemoryFacts([])
+    } finally {
+      setMemoryBusy(false)
+    }
+  }
 
   const activeConvo = conversations.find((c) => c.id === activeId) || null
   const messages = activeConvo?.messages || []
@@ -373,11 +429,44 @@ function App() {
       setInputValue('')
       setIsTyping(true)
 
+      // Memory is always scoped to the account that is signed in right now.
+      const uid = user?.uid || null
+
       const runReply = async () => {
         let aiText
-        if (isGeminiConfigured()) {
+        let handledByMemoryCommand = false
+        if (uid) {
           try {
-            aiText = await askGemini(trimmed)
+            const reply = await handleMemoryCommand(uid, trimmed)
+            if (reply) {
+              aiText = reply
+              handledByMemoryCommand = true
+              setMemoryFacts([])
+            }
+          } catch (err) {
+            console.warn('Memory command failed:', err)
+          }
+        }
+
+        if (handledByMemoryCommand) {
+          // nothing else to do
+        } else if (isGeminiConfigured()) {
+          try {
+            let memoryBlock = ''
+            if (uid) {
+              try {
+                memoryBlock = await getMemoryPromptBlock(uid)
+              } catch (err) {
+                console.warn('Memory load failed:', err)
+              }
+            }
+            aiText = await askGemini(trimmed, { memoryBlock })
+            if (uid) {
+              // Learn in the background; never block or break the reply.
+              void rememberFromExchange(uid, trimmed, aiText).then(() => {
+                if (showMemory) void refreshMemoryFacts()
+              })
+            }
           } catch (err) {
             console.error('Gemini error:', err)
             aiText = formatGeminiClientError(err)
@@ -402,7 +491,7 @@ function App() {
 
       void runReply()
     },
-    [activeId, isTyping],
+    [activeId, isTyping, user, showMemory, refreshMemoryFacts],
   )
 
   const onLinkPassword = async (e) => {
@@ -537,7 +626,7 @@ function App() {
               title={
                 isGeminiConfigured()
                   ? 'Live AI + Google Search enabled'
-                  : 'Gemini API key not set — running in offline mode. Add VITE_GEMINI_API_KEY in Vercel → redeploy.'
+                  : 'API key not set — running in offline mode. Add VITE_GEMINI_API_KEY in Vercel → redeploy.'
               }
             >
               <span
@@ -556,11 +645,76 @@ function App() {
             >
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
+            <button
+              className="ghost-pill"
+              type="button"
+              onClick={toggleMemoryPanel}
+              aria-expanded={showMemory}
+              title="What CCGPT remembers about you (only your account can see this)"
+            >
+              🧠 Memory
+            </button>
             <button className="signout-pill" type="button" onClick={() => logout()}>
               Sign Out
             </button>
           </div>
         </header>
+
+        {showMemory && (
+          <div className="memory-panel">
+            <div className="memory-panel__head">
+              <div>
+                <p className="memory-panel__title">What I remember about you</p>
+                <p className="memory-panel__copy">
+                  Saved from things you've told me, and tied only to your account. Other accounts can't see this.
+                  Say “forget everything about me” anytime to wipe it.
+                </p>
+              </div>
+              <button
+                className="memory-panel__close"
+                type="button"
+                aria-label="Close memory panel"
+                onClick={() => setShowMemory(false)}
+              >
+                ×
+              </button>
+            </div>
+            {memoryBusy && memoryFacts.length === 0 ? (
+              <p className="memory-panel__empty">Loading…</p>
+            ) : memoryFacts.length === 0 ? (
+              <p className="memory-panel__empty">
+                Nothing yet. Tell me your name, grade, sports, or clubs and I'll remember for next time.
+              </p>
+            ) : (
+              <ul className="memory-panel__list">
+                {memoryFacts.map((fact) => (
+                  <li className="memory-panel__item" key={fact}>
+                    <span>{fact}</span>
+                    <button
+                      className="memory-panel__forget"
+                      type="button"
+                      disabled={memoryBusy}
+                      onClick={() => onForgetFact(fact)}
+                      aria-label={`Forget: ${fact}`}
+                    >
+                      Forget
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {memoryFacts.length > 0 && (
+              <button
+                className="memory-panel__clear"
+                type="button"
+                disabled={memoryBusy}
+                onClick={onClearMemory}
+              >
+                Forget everything
+              </button>
+            )}
+          </div>
+        )}
 
         {accountNeedsPasswordLink(user) && (
           <div className="account-link-banner">
