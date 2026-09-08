@@ -11,6 +11,7 @@ import {
   EmailAuthProvider,
   linkWithCredential,
 } from 'firebase/auth'
+import { getFirestore } from 'firebase/firestore'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -23,6 +24,8 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
+/** Firestore — used for per-account long-term memory (see src/memory.js). */
+export const db = getFirestore(app)
 
 const googleProvider = new GoogleAuthProvider()
 
