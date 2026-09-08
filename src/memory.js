@@ -96,8 +96,10 @@ export function formatMemoryForPrompt(facts) {
   const lines = facts.map((f) => `- ${f}`).join('\n')
   return [
     '## About this student (long-term memory)',
-    'These facts were saved from earlier conversations with the signed-in user. Use them naturally to personalize answers (their name, grade, sports, clubs, preferences), but do not recite the whole list or mention that you keep a memory unless asked.',
-    'If the user asks what you remember about them, summarize these facts. If they correct one, trust the new information.',
+    'These facts were saved earlier by THIS signed-in user for their own account. Treat them as known, trusted personal context for this chat.',
+    'If they ask your name / grade / sports / clubs / what you remember: answer directly from this list (e.g. "Your name is Zain.").',
+    'Do NOT say you lack personal information, cannot store names, or have no memory — this section IS their memory for this account.',
+    'Do not recite the whole list unless asked. If they correct a fact, trust the new information.',
     lines,
   ].join('\n')
 }
