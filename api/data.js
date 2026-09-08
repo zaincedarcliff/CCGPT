@@ -1,19 +1,19 @@
-import { list } from "@vercel/blob";
+import { get } from "@vercel/blob";
 
 export default async function handler(req, res) {
   try {
-    const { blobs } = await list({ prefix: "schoolData.json", limit: 1 });
-    if (blobs && blobs.length > 0) {
-      const blob = blobs[0];
-      const r = await fetch(blob.url, { cache: "no-store" });
-      if (r.ok) {
-        const json = await r.json();
-        res.setHeader(
-          "Cache-Control",
-          "public, s-maxage=600, stale-while-revalidate=86400"
-        );
-        return res.status(200).json(json);
-      }
+    const result = await get("schoolData.json", {
+      access: "private",
+      useCache: false,
+    });
+
+    if (result?.statusCode === 200 && result.stream) {
+      const json = await new Response(result.stream).json();
+      res.setHeader(
+        "Cache-Control",
+        "public, s-maxage=600, stale-while-revalidate=86400"
+      );
+      return res.status(200).json(json);
     }
   } catch (err) {
     console.warn("Blob fetch failed, falling back to bundled data:", err?.message);
