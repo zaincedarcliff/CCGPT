@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     });
 
     const blob = await put("schoolData.json", body, {
-      access: "public",
+      access: "private",
       contentType: "application/json",
       allowOverwrite: true,
       addRandomSuffix: false,
