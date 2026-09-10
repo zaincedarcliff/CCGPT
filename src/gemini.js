@@ -371,10 +371,26 @@ function messageForEmptyModelReply(reason, promptBlock) {
   if (reason === 'MAX_TOKENS') {
     return 'That answer got cut off before it finished. Try asking a narrower question (e.g. one sport, one counselor, one topic at a time).'
   }
-  if (reason === 'MALFORMED_FUNCTION_CALL' || reason === 'OTHER') {
+  if (
+    reason === 'MALFORMED_FUNCTION_CALL' ||
+    reason === 'UNEXPECTED_TOOL_CALL' ||
+    reason === 'OTHER'
+  ) {
     return "I didn't get a usable answer that time. Please try again in a moment, or rephrase your question."
   }
-  return "I didn't get a usable answer that time. Please try again, or ask a narrower Cedar Cliff question."
+  const detail = reason || promptBlock ? ` (Gemini returned no text; reason: ${reason || promptBlock})` : ''
+  return `I didn't get a usable answer that time. Please try again, or ask a narrower Cedar Cliff question.${detail}`
+}
+
+/** 429 (quota / rate limit) and 403 (bad key) — retrying without tools can't fix these. */
+function isQuotaOrAuthError(err) {
+  const raw = String(err?.message ?? err ?? '')
+  const status = err?.status ?? err?.code
+  return (
+    status === 429 ||
+    status === 403 ||
+    /RESOURCE_EXHAUSTED|PERMISSION_DENIED|"code":\s*(429|403)\b/.test(raw)
+  )
 }
 
 export function formatGeminiClientError(err) {
@@ -408,6 +424,14 @@ export function formatGeminiClientError(err) {
         'A **new API key in the same project** still uses that same balance — it does not reset credits.',
         'Open https://aistudio.google.com/ → **API keys** → note the **project** → **Billing / usage** and add prepay or link Cloud billing. Or create a **new project** with its own funded billing.',
         'If production (e.g. Vercel) still fails after local works: set **VITE_GEMINI_API_KEY** there and redeploy.',
+      ].join('\n\n')
+    }
+    const isDailyCap = /PerDay|free_tier_requests/i.test(raw)
+    if (isDailyCap) {
+      const limit = raw.match(/"quotaValue":\s*"(\d+)"/)?.[1] || raw.match(/limit:\s*(\d+)/)?.[1]
+      return [
+        `**AI daily limit reached.** This API key is on the Gemini free tier${limit ? ` (${limit} requests per day for this model)` : ''} and has used today’s quota. It resets at midnight Pacific time.`,
+        'To remove the cap, enable billing for the key’s project at https://aistudio.google.com/ (API keys → project → Billing), then redeploy if the key changes.',
       ].join('\n\n')
     }
     return [
@@ -469,49 +493,53 @@ export async function askGemini(userText, options = {}) {
       systemInstruction += `\n\n## Cedar Cliff course catalog (structured, with tags)\nThe user is asking about courses/classes offered at Cedar Cliff. Below is the authoritative list of courses extracted from the West Shore School District curriculum pages, grouped by department. Each course includes relevant tags in brackets: AP, Honors, Dual Enrollment, NCAA-eligible, College (college-level), HACC / Harrisburg University / Penn College (partner institution), Semester, or Full Year.\n\n### Response rules\n- **Always format as a clean bulleted list** (not prose paragraphs). Group by department when listing many courses.\n- **Filter the list to what the user actually asked for.** If they asked for "dual enrollment classes", return only courses tagged Dual Enrollment. If they asked for "Honors English", return only English courses tagged Honors. Combine filters intelligently.\n- **Be flexible about phrasing.** "AP classes", "advanced placement courses", "AP offerings", "what APs can I take" should all produce the AP list. Likewise "HACC", "college in high school", "college courses", "dual enrollment" are all near-synonyms — use them interchangeably when reasonable.\n- If no courses match the combination, say so and suggest a related filter (e.g. "Cedar Cliff doesn't currently list an Honors Math course. The closest options are: Calculus, AP Calculus AB, AP Calculus BC, AP Statistics…").\n- Keep prerequisites / credit / summer-work mentions brief — point students to the counselor for scheduling.\n\n### Course data\n${deptSections}`
     }
   }
+  // Search directives only go into the *grounded* prompt. If we have to retry without the
+  // googleSearch tool, a prompt that still says "CALL googleSearch" makes the model emit a tool
+  // call anyway, which comes back as finishReason=UNEXPECTED_TOOL_CALL with no text at all.
+  let groundedInstruction = systemInstruction
   if (wantsLiveSportsAnswer(userText)) {
-    systemInstruction += `\n\n## Priority for this message\nThe user asked about sports games, schedules, or scores. **Use Google Search grounding** to answer with current information. Do not rely on older announcement snippets alone for a full schedule — confirm against search when possible. If scraped lines conflict with search, prefer search for dates and scores.`
+    groundedInstruction += `\n\n## Priority for this message\nThe user asked about sports games, schedules, or scores. **Use Google Search grounding** to answer with current information. Do not rely on older announcement snippets alone for a full schedule — confirm against search when possible. If scraped lines conflict with search, prefer search for dates and scores.`
   }
   if (isCedarCliffFactualQuestion(userText)) {
-    systemInstruction += `\n\n## Priority for this message\nThis is a factual Cedar Cliff / West Shore question. **CALL the \`googleSearch\` tool** before drafting your final answer. Use "Cedar Cliff High School Camp Hill PA" or "West Shore School District" plus the topic. Cite the URLs you used at the bottom.`
+    groundedInstruction += `\n\n## Priority for this message\nThis is a factual Cedar Cliff / West Shore question. **CALL the \`googleSearch\` tool** before drafting your final answer. Use "Cedar Cliff High School Camp Hill PA" or "West Shore School District" plus the topic. Cite the URLs you used at the bottom.`
   }
+  const ungroundedInstruction =
+    systemInstruction +
+    `\n\n## Note for this message\nGoogle Search is **not available** for this reply and no tools are attached — do not attempt to call any tool. Answer directly from the scraped school data and the reference material above plus general knowledge. If they don't cover the question, say so briefly and point to the official site (https://www.wssd.k12.pa.us/cedarcliff.aspx) or the main office.`
 
   const ai = new GoogleGenAI({ apiKey: String(apiKey).trim() })
   const tools = googleSearchTools()
-  const contents = augmentUserMessageForSearch(userText)
+  const groundedContents = augmentUserMessageForSearch(userText)
   const usesThinkingModel = /gemini-2\.5|gemini-3/i.test(modelName)
 
-  const callModel = (useTools) =>
-    ai.models.generateContent({
+  const callModel = (useTools) => {
+    const grounded = Boolean(useTools && tools)
+    return ai.models.generateContent({
       model: modelName,
-      contents,
+      contents: grounded ? groundedContents : String(userText),
       config: {
-        systemInstruction,
+        systemInstruction: grounded ? groundedInstruction : ungroundedInstruction,
         maxOutputTokens: 8192,
-        // 2.5 Flash defaults to dynamic thinking; disable so replies keep real answer text.
-        ...(usesThinkingModel
-          ? { thinkingConfig: { thinkingBudget: 0 } }
-          : {}),
-        ...(useTools && tools ? { tools } : {}),
+        // 2.5 Flash defaults to dynamic thinking; keep a small fixed budget so replies still
+        // contain real answer text (budget 0 + grounding is a known source of empty replies).
+        ...(usesThinkingModel ? { thinkingConfig: { thinkingBudget: 512 } } : {}),
+        ...(grounded ? { tools } : {}),
       },
     })
+  }
 
   let response
   let usedTools = Boolean(tools)
+  let firstError
   try {
     response = await callModel(true)
   } catch (err) {
-    const msg = String(err?.message || '')
-    const looksLikeToolError =
-      /tool|googleSearch|google_search|grounding|unsupported/i.test(msg) ||
-      err?.status === 400
-    if (tools && looksLikeToolError) {
-      console.warn('[gemini] googleSearch tool rejected, retrying without it:', msg)
-      usedTools = false
-      response = await callModel(false)
-    } else {
-      throw err
-    }
+    // Quota / auth failures won't get better without the tool — surface them as-is.
+    if (!tools || isQuotaOrAuthError(err)) throw err
+    console.warn('[gemini] grounded call failed, retrying without googleSearch:', err?.message || err)
+    firstError = err
+    usedTools = false
+    response = await callModel(false)
   }
 
   let firstReason = response?.candidates?.[0]?.finishReason
@@ -542,6 +570,8 @@ export async function askGemini(userText, options = {}) {
       }
     } catch (err) {
       console.warn('[gemini] retry without tools failed:', err?.message || err)
+      // A quota/auth error is more useful to the user than a generic "no answer" message.
+      if (isQuotaOrAuthError(err)) throw err
     }
   }
 
@@ -550,6 +580,8 @@ export async function askGemini(userText, options = {}) {
     const reason = firstReason || response?.candidates?.[0]?.finishReason
     const promptBlock = firstPromptBlock || response?.promptFeedback?.blockReason
     console.warn('[gemini] empty response. finishReason=', reason, 'promptBlock=', promptBlock, response)
+    // If the grounded call threw and the fallback call also produced nothing, report the real error.
+    if (firstError) throw firstError
     return messageForEmptyModelReply(reason, promptBlock)
   }
 
