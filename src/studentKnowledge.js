@@ -1,4 +1,49 @@
+import { classYearsByGrade, gradeForClassYear, schoolYearLabel } from './schoolYear.js'
+
+/**
+ * Counselors are assigned by graduating class and stay with that class until it graduates
+ * (source: https://www.wssd.k12.pa.us/CedarCliffGuidance.aspx). Keep this keyed by class year —
+ * the grade label ("freshmen", "seniors", …) is derived from today's date, so it never goes stale.
+ * When a new class enters (e.g. Class of 2031), add its counselor here; until then the model is
+ * told to rely on the scraped Guidance page.
+ */
+export const COUNSELORS_BY_CLASS = [
+  { classYear: 2027, name: 'Mrs. Jennifer Crager', email: 'jcrager@wssd.k12.pa.us', ext: '219' },
+  { classYear: 2028, name: 'Mrs. Jessie Alexander-Gray', email: 'jgray@wssd.k12.pa.us', ext: '218' },
+  { classYear: 2029, name: 'Ms. Meghan Cummings', email: 'mcummings@wssd.k12.pa.us', ext: '215' },
+  { classYear: 2030, name: 'Mr. Patrick Tierney', email: 'ptierney@wssd.k12.pa.us', ext: '220' },
+]
+
+/** Counselor rows for classes currently in the building, newest class first. */
+export function currentCounselorAssignments(date = new Date()) {
+  return COUNSELORS_BY_CLASS.map((c) => ({ ...c, grade: gradeForClassYear(c.classYear, date) }))
+    .filter((c) => c.grade !== 'graduated')
+    .sort((a, b) => b.classYear - a.classYear)
+}
+
+function counselorLines(date = new Date()) {
+  const rows = currentCounselorAssignments(date)
+  const years = classYearsByGrade(date)
+  const known = new Set(rows.map((r) => r.classYear))
+  const lines = rows.map(
+    (c) => `Class of ${c.classYear} (${c.grade}) — ${c.name}\n  Email: ${c.email} | Phone: ext. ${c.ext}`,
+  )
+  for (const [grade, year] of Object.entries(years)) {
+    if (!known.has(year)) {
+      lines.push(
+        `Class of ${year} (${grade}) — counselor not yet listed here; use the scraped Cedar Cliff Guidance page or Google Search for the current assignment.`,
+      )
+    }
+  }
+  return lines.join('\n')
+}
+
+const YEARS = classYearsByGrade()
+
 export const studentKnowledge = `
+## CURRENT SCHOOL YEAR: ${schoolYearLabel()}
+Freshmen = Class of ${YEARS.freshmen}, sophomores = Class of ${YEARS.sophomores}, juniors = Class of ${YEARS.juniors}, seniors = Class of ${YEARS.seniors}.
+
 ## ABOUT CEDAR CLIFF HIGH SCHOOL
 Cedar Cliff High School is a long-standing part of the West Shore community (over 50+ years).
 Recent renovations expanded learning spaces, including upgraded gym, cafeteria, auditorium, and a new library.
@@ -14,27 +59,21 @@ Cedar Cliff High School
 Phone: 717-737-8654 | Fax: 717-737-0874
 
 ## PRINCIPAL
-Mrs. Jennifer S. Post, Principal
-New principal as of the 2025-26 school year.
+Mrs. Jennifer S. Post, Principal (since the 2025-26 school year).
 Started at Cedar Cliff in 2000 as a Social Studies teacher, later served as assistant principal and principal at other district schools.
 Focus is on ensuring students feel welcomed, safe, and supported, and on continuous improvement.
 Encourages conversations with parents and the community.
 
-## SENIORS (CLASS OF 2026 INFO)
-- Cap & gown purchases ($45, cash/check) and deadlines
+## SENIORS (CLASS OF ${YEARS.seniors})
+Typical senior-year items — exact dates, prices, and venue change every year, so confirm against the scraped "Seniors ${YEARS.seniors}" page or Google Search before stating them:
+- Cap & gown purchases and deadlines
 - Senior portraits and yearbook info
-- Graduation at the PA Farm Show Complex
+- Graduation ceremony (recent years: PA Farm Show Complex)
 - Key events: prom, SAT dates, Senior Exit Interviews, Senior Awards Night
 
 ## COUNSELOR ASSIGNMENTS BY CLASS YEAR
-Class of 2029 (freshmen) — Ms. Meghan Cummings
-  Email: mcummings@wssd.k12.pa.us | Phone: ext. 215
-Class of 2026 (seniors) — Mr. Patrick Tierney
-  Email: ptierney@wssd.k12.pa.us | Phone: ext. 220
-Class of 2027 (juniors) — Mrs. Jennifer Crager
-  Email: jcrager@wssd.k12.pa.us | Phone: ext. 219
-Class of 2028 (sophomores) — Mrs. Jessie Alexander-Gray
-  Email: jalexander@wssd.k12.pa.us | Phone: ext. 218
+Counselors are assigned by graduating class and stay with that class through graduation.
+${counselorLines()}
 
 ## SPECIALIZED COUNSELORS & SUPPORT
 Ms. Stacy Thorpe — Supports students with GIEP's, Life Skills, CTC programs, and English Language Learners (Newcomers)

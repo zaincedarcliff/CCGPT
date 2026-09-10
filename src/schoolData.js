@@ -87,8 +87,18 @@ export const TOPIC_RULES = [
   },
   {
     id: 'guidance',
-    keywords: ['counselor', 'guidance', 'counseling'],
+    keywords: ['counselor', 'guidance', 'counseling', 'transcript', 'keystone', 'college visit'],
     match: (src) => src.includes('Guidance'),
+  },
+  {
+    id: 'seniors',
+    keywords: ['senior', 'seniors', 'graduation', 'graduate', 'cap and gown', 'cap & gown', 'commencement', 'prom'],
+    match: (src) => /Seniors\d{4}\.aspx/i.test(src),
+  },
+  {
+    id: 'principal',
+    keywords: ['principal', 'administration', 'administrator'],
+    match: (src) => src.includes('PrincipalsMessage') || src.includes('AboutCedarCliff'),
   },
   {
     id: 'newsletter',

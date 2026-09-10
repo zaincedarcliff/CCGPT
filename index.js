@@ -26,7 +26,8 @@ export const urls = [
   "https://www.wssd.k12.pa.us/AttendanceInformation.aspx",
   "https://www.wssd.k12.pa.us/WorkPermits.aspx",
   "https://www.wssd.k12.pa.us/DailyAnnouncements1.aspx",
-  "https://www.wssd.k12.pa.us/Seniors2025.aspx",
+  // NOTE: the "Seniors YYYY" page is year-specific (Seniors2027.aspx, …) and is discovered
+  // automatically from the Cedar Cliff nav in runScrape() — do not hardcode it here.
   "https://www.wssd.k12.pa.us/CedarCliffGuidance.aspx",
   "https://www.wssd.k12.pa.us/AthleticsCCHS.aspx",
   "https://www.wssd.k12.pa.us/Aquaponics.aspx",
@@ -134,25 +135,85 @@ export const urls = [
   "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/field-hockey/freshman/",
 ];
 
+const REQUEST_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Encoding": "gzip, deflate, br",
+  "Upgrade-Insecure-Requests": "1",
+};
+
+const MIN_LINE_LENGTH = 40;
+
+/** Cloudflare "email-protection" obfuscates addresses; decode them so the text keeps the real email. */
+function decodeCloudflareEmail(encoded) {
+  const key = parseInt(encoded.slice(0, 2), 16);
+  let out = "";
+  for (let i = 2; i < encoded.length; i += 2) {
+    out += String.fromCharCode(parseInt(encoded.slice(i, i + 2), 16) ^ key);
+  }
+  return out;
+}
+
+function unprotectEmails($) {
+  $("[data-cfemail]").each((_i, el) => {
+    const encoded = $(el).attr("data-cfemail");
+    if (encoded) $(el).replaceWith(decodeCloudflareEmail(encoded));
+  });
+  $('a[href^="/cdn-cgi/l/email-protection#"]').each((_i, el) => {
+    const hash = ($(el).attr("href") || "").split("#")[1];
+    if (hash && !/@/.test($(el).text())) $(el).text(decodeCloudflareEmail(hash));
+  });
+}
+
+/**
+ * The WSSD CMS renders page bodies inside `span[id$="_lblText"]` as loose `<div>`/`<br>` lines
+ * (not <p>/<li>), so a tag-based selector misses the main content (counselor list, senior info…).
+ * Split those blocks on block-level boundaries and keep each line.
+ */
+function extractCmsContentLines($) {
+  const lines = [];
+  $('span[id$="_lblText"], .component_container').each((_i, block) => {
+    const html = $(block).html() || "";
+    const withBreaks = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(div|p|li|tr|h[1-6])>/gi, "$&\n");
+    const text = cheerio.load(`<div>${withBreaks}</div>`)("div").first().text();
+    for (const raw of text.split("\n")) {
+      const line = raw.replace(/\s+/g, " ").trim();
+      if (line.length > MIN_LINE_LENGTH) lines.push(line);
+    }
+  });
+  return lines;
+}
+
+/** The district site returns HTTP 200 for missing pages; detect them so stale URLs aren't stored as content. */
+function isErrorPage($) {
+  const title = $("title").text().trim();
+  return /an error has occurred|page not found/i.test(title);
+}
+
 export async function scrapeUrl(url) {
-  const { data } = await axios.get(url, {
-    timeout: 20000,
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Accept-Encoding": "gzip, deflate, br",
-      "Upgrade-Insecure-Requests": "1",
-    },
-  });
+  const { data } = await axios.get(url, { timeout: 20000, headers: REQUEST_HEADERS });
   const $ = cheerio.load(data);
+  if (isErrorPage($)) {
+    throw new Error(`site returned an error page (${$("title").text().trim()})`);
+  }
+  unprotectEmails($);
+  $("script, style, noscript").remove();
+
+  const seen = new Set();
   const pageText = [];
-  $("h1, h2, h3, p, li, td, th").each((_i, el) => {
-    const text = $(el).text().trim();
-    if (text.length > 40) pageText.push(text);
-  });
+  const push = (text) => {
+    const line = text.replace(/\s+/g, " ").trim();
+    if (line.length > MIN_LINE_LENGTH && !seen.has(line)) {
+      seen.add(line);
+      pageText.push(line);
+    }
+  };
+  $("h1, h2, h3, p, li, td, th").each((_i, el) => push($(el).text()));
+  for (const line of extractCmsContentLines($)) push(line);
+
   return {
     source: url,
     scrapedAt: new Date().toISOString(),
@@ -160,9 +221,36 @@ export async function scrapeUrl(url) {
   };
 }
 
+/**
+ * Find year-specific pages linked from the Cedar Cliff nav (e.g. "Seniors 2027" → Seniors2027.aspx)
+ * so the URL list never points at last year's page.
+ */
+export async function discoverYearPages() {
+  try {
+    const { data } = await axios.get("https://www.wssd.k12.pa.us/cedarcliff.aspx", {
+      timeout: 20000,
+      headers: REQUEST_HEADERS,
+    });
+    const $ = cheerio.load(data);
+    const found = new Set();
+    $("a[href]").each((_i, a) => {
+      const href = $(a).attr("href") || "";
+      const m = href.match(/\/?(Seniors\d{4}\.aspx)$/i);
+      if (m) found.add(`https://www.wssd.k12.pa.us/${m[1]}`);
+    });
+    return [...found];
+  } catch (err) {
+    console.log(`Failed to discover year-specific pages — ${err.message}`);
+    return [];
+  }
+}
+
 export async function runScrape() {
   const allData = [];
-  for (const url of urls) {
+  const yearPages = await discoverYearPages();
+  const targets = [...urls];
+  for (const u of yearPages) if (!targets.includes(u)) targets.push(u);
+  for (const url of targets) {
     try {
       const entry = await scrapeUrl(url);
       allData.push(entry);

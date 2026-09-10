@@ -23,13 +23,12 @@ import {
 import { auth, logout, onAuthStateChanged, linkPasswordToCurrentUser } from './firebase.js'
 import {
   resetMemoryCache,
-  loadUserMemory,
   getMemoryPromptBlock,
   handleMemoryCommand,
   rememberFromExchange,
-  clearUserMemory,
-  forgetFact,
 } from './memory.js'
+import { currentCounselorAssignments } from './studentKnowledge.js'
+import { classYearsByGrade, schoolYearLabel } from './schoolYear.js'
 import Auth from './Auth.jsx'
 import './App.css'
 
@@ -44,15 +43,22 @@ const quickActions = [
   { label: 'Senior info', icon: '📃' },
 ]
 
+const CLASS_YEARS = classYearsByGrade()
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
+const counselorBullets = currentCounselorAssignments()
+  .map((c) => `• **Class of ${c.classYear} (${capitalize(c.grade)})**: ${c.name} — ${c.email}, ext. ${c.ext}`)
+  .join('\n')
+const seniorCounselor = currentCounselorAssignments().find((c) => c.classYear === CLASS_YEARS.seniors)
+
 const schoolKnowledge = {
   'school location': `Cedar Cliff High School is located at 1301 Carlisle Road, Camp Hill, PA 17011. It's part of the West Shore School District in Cumberland County, Pennsylvania.\n\nPhone: 717-737-8654 | Fax: 717-737-0874`,
-  'my counselor': `Cedar Cliff High School counselors are assigned by graduating class:\n\n• **Class of 2029 (Freshmen)**: Ms. Meghan Cummings — mcummings@wssd.k12.pa.us, ext. 215\n• **Class of 2028 (Sophomores)**: Mrs. Jessie Alexander-Gray — jalexander@wssd.k12.pa.us, ext. 218\n• **Class of 2027 (Juniors)**: Mrs. Jennifer Crager — jcrager@wssd.k12.pa.us, ext. 219\n• **Class of 2026 (Seniors)**: Mr. Patrick Tierney — ptierney@wssd.k12.pa.us, ext. 220\n\n**Support**: Ms. Stacy Thorpe (GIEP, Life Skills, CTC, ELL) — sthorpe@wssd.k12.pa.us, ext. 217\n**Guidance Secretary**: Ms. Joyce Hayes — jhayes@wssd.k12.pa.us, ext. 221`,
+  'my counselor': `Cedar Cliff High School counselors are assigned by graduating class (${schoolYearLabel()} school year):\n\n${counselorBullets}\n\n**Support**: Ms. Stacy Thorpe (GIEP, Life Skills, CTC, ELL) — sthorpe@wssd.k12.pa.us, ext. 217\n**Guidance Secretary**: Ms. Joyce Hayes — jhayes@wssd.k12.pa.us, ext. 221`,
   'sports': `Cedar Cliff offers a wide range of sports programs:\n\n🏈 **Fall**: Football, Boys & Girls Soccer, Field Hockey, Golf, Girls Volleyball, Girls Tennis, Cross Country, Cheerleading\n🏀 **Winter**: Boys & Girls Basketball, Boys & Girls Wrestling, Boys & Girls Swimming & Diving, Unified Bocce, Cheerleading\n⚾ **Spring**: Baseball, Softball, Boys & Girls Lacrosse, Boys Volleyball, Boys Tennis, Track & Field\n\nSome teams also have JV and Freshman squads. Go Colts! 🐴`,
-  'principal': `The principal of Cedar Cliff High School is **Mrs. Jennifer S. Post**.\n\nShe became principal for the 2025-26 school year. She started at Cedar Cliff in 2000 as a Social Studies teacher and later served as assistant principal and principal at other district schools.\n\nHer focus is on ensuring students feel welcomed, safe, and supported.\n\nContact the main office at 717-737-8654.`,
+  'principal': `The principal of Cedar Cliff High School is **Mrs. Jennifer S. Post**.\n\nShe has been principal since the 2025-26 school year. She started at Cedar Cliff in 2000 as a Social Studies teacher and later served as assistant principal and principal at other district schools.\n\nHer focus is on ensuring students feel welcomed, safe, and supported.\n\nContact the main office at 717-737-8654.`,
   'basketball games': `Cedar Cliff Colts Basketball 🏀\n\nThe Colts compete in the Mid-Penn Conference.`,
   'contact info': `📞 **Cedar Cliff High School Contact Information**\n\n• **Main Office**: 717-737-8654\n• **Fax**: 717-737-0874\n• **Address**: 1301 Carlisle Road, Camp Hill, PA 17011\n• **District**: West Shore School District\n• **Website**: https://www.wssd.k12.pa.us/cedarcliff.aspx\n• **Instagram**: @cedarcliff_colts`,
   'clubs': `Cedar Cliff offers 50+ clubs and extracurricular activities:\n\n🎭 **Arts & Performance**: Drama Club, Band, Choir, Art Club, Musical\n📚 **Academic**: National Honor Society, Math League, Science Olympiad, Debate Team, Model UN\n🤝 **Service**: Key Club, Student Government, SADD, Interact Club, Friends Forever Club\n💻 **Technology**: Robotics Club, Coding Club\n🌍 **Cultural**: Spanish Club, French Club, Diversity Club\n🎖️ **Leadership**: JROTC (Honor Unit with Distinction)\n⚡ **Other**: Yearbook, School Newspaper, FBLA, DECA, Aquaponics\n\nClub meetings are typically held after school. Check the morning announcements for meeting times!`,
-  'senior info': `🎓 **Senior Information (Class of 2026)**\n\n• **Graduation**: PA Farm Show Complex\n• **Cap & Gown**: $45 (cash/check)\n• **Senior Portraits**: Check yearbook info on the school website\n• **Senior Counselor**: Mr. Patrick Tierney — ptierney@wssd.k12.pa.us, ext. 220\n• **Key Events**: Prom, SAT dates, Senior Exit Interviews, Senior Awards Night, Graduation\n• **College Apps**: See your counselor for guidance and recommendation letters\n• **Transcripts**: Request through the guidance office\n\nCongratulations on your senior year, Colt! 🐴`,
+  'senior info': `🎓 **Senior Information (Class of ${CLASS_YEARS.seniors})**\n\n• **Graduation**: Held at the PA Farm Show Complex in recent years — confirm this year's date on the Seniors ${CLASS_YEARS.seniors} page\n• **Cap & Gown**: Ordering info and deadlines are posted on the Seniors ${CLASS_YEARS.seniors} page\n• **Senior Portraits**: Check yearbook info on the school website\n• **Senior Counselor**: ${seniorCounselor ? `${seniorCounselor.name} — ${seniorCounselor.email}, ext. ${seniorCounselor.ext}` : 'See the Cedar Cliff Guidance page'}\n• **Key Events**: Prom, SAT dates, Senior Exit Interviews, Senior Awards Night, Graduation\n• **College Apps**: See your counselor for guidance and recommendation letters\n• **Transcripts**: Current students request through SchooLinks\n\nOfficial page: https://www.wssd.k12.pa.us/Seniors${CLASS_YEARS.seniors}.aspx\n\nCongratulations on your senior year, Colt! 🐴`,
 }
 
 const SPORT_WORDS = [
@@ -311,9 +317,6 @@ function App() {
   const [linkBusy, setLinkBusy] = useState(false)
   const [theme, setTheme] = useState(getInitialTheme)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [showMemory, setShowMemory] = useState(false)
-  const [memoryFacts, setMemoryFacts] = useState([])
-  const [memoryBusy, setMemoryBusy] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -331,53 +334,12 @@ function App() {
       // Account changed (sign-in, sign-out, or switch): drop anything cached for the
       // previous account so memory never leaks between users.
       resetMemoryCache()
-      setMemoryFacts([])
-      setShowMemory(false)
       setUser(u ?? null)
       setConversations(loadConversations(u?.uid))
       setActiveId(null)
     })
     return unsub
   }, [])
-
-  const refreshMemoryFacts = useCallback(async () => {
-    if (!user?.uid) return
-    setMemoryBusy(true)
-    try {
-      setMemoryFacts(await loadUserMemory(user.uid))
-    } finally {
-      setMemoryBusy(false)
-    }
-  }, [user])
-
-  const toggleMemoryPanel = useCallback(() => {
-    setShowMemory((open) => {
-      if (!open) void refreshMemoryFacts()
-      return !open
-    })
-  }, [refreshMemoryFacts])
-
-  const onForgetFact = async (fact) => {
-    if (!user?.uid) return
-    setMemoryBusy(true)
-    try {
-      setMemoryFacts(await forgetFact(user.uid, fact))
-    } finally {
-      setMemoryBusy(false)
-    }
-  }
-
-  const onClearMemory = async () => {
-    if (!user?.uid) return
-    if (!window.confirm('Forget everything CCGPT has learned about you? This cannot be undone.')) return
-    setMemoryBusy(true)
-    try {
-      await clearUserMemory(user.uid)
-      setMemoryFacts([])
-    } finally {
-      setMemoryBusy(false)
-    }
-  }
 
   const activeConvo = conversations.find((c) => c.id === activeId) || null
   const messages = activeConvo?.messages || []
@@ -441,7 +403,6 @@ function App() {
             if (reply) {
               aiText = reply
               handledByMemoryCommand = true
-              setMemoryFacts([])
             }
           } catch (err) {
             console.warn('Memory command failed:', err)
@@ -463,9 +424,7 @@ function App() {
             aiText = await askGemini(trimmed, { memoryBlock })
             if (uid) {
               // Learn in the background; never block or break the reply.
-              void rememberFromExchange(uid, trimmed, aiText).then(() => {
-                if (showMemory) void refreshMemoryFacts()
-              })
+              void rememberFromExchange(uid, trimmed, aiText)
             }
           } catch (err) {
             console.error('Gemini error:', err)
@@ -491,7 +450,7 @@ function App() {
 
       void runReply()
     },
-    [activeId, isTyping, user, showMemory, refreshMemoryFacts],
+    [activeId, isTyping, user],
   )
 
   const onLinkPassword = async (e) => {
@@ -645,76 +604,11 @@ function App() {
             >
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
-            <button
-              className="ghost-pill"
-              type="button"
-              onClick={toggleMemoryPanel}
-              aria-expanded={showMemory}
-              title="What CCGPT remembers about you (only your account can see this)"
-            >
-              🧠 Memory
-            </button>
             <button className="signout-pill" type="button" onClick={() => logout()}>
               Sign Out
             </button>
           </div>
         </header>
-
-        {showMemory && (
-          <div className="memory-panel">
-            <div className="memory-panel__head">
-              <div>
-                <p className="memory-panel__title">What I remember about you</p>
-                <p className="memory-panel__copy">
-                  Saved from things you've told me, and tied only to your account. Other accounts can't see this.
-                  Say “forget everything about me” anytime to wipe it.
-                </p>
-              </div>
-              <button
-                className="memory-panel__close"
-                type="button"
-                aria-label="Close memory panel"
-                onClick={() => setShowMemory(false)}
-              >
-                ×
-              </button>
-            </div>
-            {memoryBusy && memoryFacts.length === 0 ? (
-              <p className="memory-panel__empty">Loading…</p>
-            ) : memoryFacts.length === 0 ? (
-              <p className="memory-panel__empty">
-                Nothing yet. Tell me your name, grade, sports, or clubs and I'll remember for next time.
-              </p>
-            ) : (
-              <ul className="memory-panel__list">
-                {memoryFacts.map((fact) => (
-                  <li className="memory-panel__item" key={fact}>
-                    <span>{fact}</span>
-                    <button
-                      className="memory-panel__forget"
-                      type="button"
-                      disabled={memoryBusy}
-                      onClick={() => onForgetFact(fact)}
-                      aria-label={`Forget: ${fact}`}
-                    >
-                      Forget
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {memoryFacts.length > 0 && (
-              <button
-                className="memory-panel__clear"
-                type="button"
-                disabled={memoryBusy}
-                onClick={onClearMemory}
-              >
-                Forget everything
-              </button>
-            )}
-          </div>
-        )}
 
         {accountNeedsPasswordLink(user) && (
           <div className="account-link-banner">

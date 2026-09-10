@@ -100,6 +100,7 @@ export function formatMemoryForPrompt(facts) {
     'If they ask your name / grade / sports / clubs / what you remember: answer directly from this list (e.g. "Your name is Zain.").',
     'Do NOT say you lack personal information, cannot store names, or have no memory — this section IS their memory for this account.',
     'Do not recite the whole list unless asked. If they correct a fact, trust the new information.',
+    'Grade words ("freshman", "junior") may have been saved in an earlier school year. If a fact includes a "class of" year, derive the current grade from it using the "Current school year" line at the top of this prompt.',
     lines,
   ].join('\n')
 }
