@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai'
 import { studentKnowledge } from './studentKnowledge.js'
+import { classYearsByGrade, schoolYearContextLine } from './schoolYear.js'
 import {
   loadSchoolData,
   getRelevantEntries,
@@ -82,7 +83,7 @@ You have **three** kinds of context. **Do not** behave as if only the long "supp
 - Cedar Cliff Musical
 - Cedar Cliff Friends Forever Club
 - Cedar Cliff Gifted Program
-- Seniors 2026 information
+- Seniors ${classYearsByGrade().seniors} information (https://www.wssd.k12.pa.us/Seniors${classYearsByGrade().seniors}.aspx)
 - ExCEL Virtual Learning Academy
 - PowerSchool (grades portal)
 - Electronic Absence Submission
@@ -170,7 +171,8 @@ If you are unsure whether a request is graded work, **treat it as graded work an
 - For **sports** (schedules, scores, recaps, "games left"): first use the **Scraped school data** in this prompt — it includes MaxPreps game results and previews and is the most recent version available at build time. If Google Search is enabled, use it to verify or extend what's in the scrape. Only fall back to "check MaxPreps" if neither source has anything useful.
 
 ## Supplemental reference only (not a closed knowledge base)
-The following section is **additional Cedar Cliff reference material** (courses, policies, stable facts). It does **not** replace Google Search or the scraped data for current events, athletics results, or anything that changes over time.
+The following section is **additional Cedar Cliff reference material** (courses, policies, stable facts). It does **not** replace Google Search or the scraped data for current events, athletics results, or anything that changes over time. **If the scraped school data or a search result conflicts with anything below (names, dates, prices, assignments), trust the scraped/search data — it is newer.**
+- **Grade ↔ class year:** always use the "Current school year" line at the top of this prompt to convert between "freshman/sophomore/junior/senior" and "Class of 20XX". Never infer a student's class year from a staff member's own graduation year or from search snippets about past years.
 
 ${studentKnowledge}`
 
@@ -466,7 +468,8 @@ export async function askGemini(userText, options = {}) {
   const data = await loadSchoolData()
   const relevantInfo = getRelevantData(userText, data)
 
-  let systemInstruction = BASE_INSTRUCTION
+  // Computed per request so the model always knows today's date and the current grade ↔ class-year map.
+  let systemInstruction = `## Current school year\n${schoolYearContextLine()}\n\n${BASE_INSTRUCTION}`
   const memoryBlock = String(options?.memoryBlock || '').trim()
   if (memoryBlock) {
     systemInstruction += `\n\n${memoryBlock}`
@@ -615,7 +618,8 @@ export async function extractMemoryFacts(userText, assistantText, existingFacts 
     'Keep: name / what to call them, grade or graduation year, sports, clubs, activities, classes or teachers they mention taking, counselor, interests, goals, how they like answers (short, detailed, etc.).',
     'Skip: one-off questions, temporary things (tonight\'s homework, "I\'m tired"), anything the ASSISTANT said, facts about other people, and sensitive data (health, address, phone, passwords, grades/scores, family details).',
     'If the user asks to forget or correct something, put the old fact text in "remove".',
-    'Each fact: one short sentence, third person, under 120 characters, e.g. "Is a junior (class of 2027)." or "Plays varsity soccer."',
+    `Each fact: one short sentence, third person, under 120 characters, e.g. "Is a junior (class of ${classYearsByGrade().juniors})." or "Plays varsity soccer."`,
+    `Prefer storing the graduation year over the grade word (grades change every year; class year does not). ${schoolYearContextLine()}`,
     'Do not repeat facts already in the list unless updating them (then add the new one and remove the old one).',
     '',
     'Respond with ONLY JSON: {"add": string[], "remove": string[]}. Use empty arrays when nothing applies.',
