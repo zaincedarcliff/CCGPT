@@ -4,5 +4,10 @@
       "path": "/api/scrape",
       "schedule": "0 10 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/chat.js": { "maxDuration": 60 },
+    "api/scrape.js": { "maxDuration": 300 },
+    "api/kb-status.js": { "maxDuration": 60 }
+  }
 }

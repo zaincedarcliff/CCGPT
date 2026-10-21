@@ -6,6 +6,7 @@ import {
   isHomeworkHelpRequest,
   HOMEWORK_REFUSAL_MESSAGE,
   formatGeminiClientError,
+  fetchAiStatus,
 } from './gemini.js'
 import {
   loadSchoolData,
@@ -23,16 +24,18 @@ import {
 import { auth, logout, onAuthStateChanged, linkPasswordToCurrentUser } from './firebase.js'
 import {
   resetMemoryCache,
-  getMemoryPromptBlock,
+  loadUserMemory,
   handleMemoryCommand,
-  rememberFromExchange,
+  applyMemoryUpdate,
 } from './memory.js'
 import { currentCounselorAssignments } from './studentKnowledge.js'
 import { classYearsByGrade, schoolYearLabel } from './schoolYear.js'
 import Auth from './Auth.jsx'
+import { MessageText, MessageSources } from './MessageContent.jsx'
 import './App.css'
 
 const quickActions = [
+  { label: "Today's announcements", icon: '📣' },
   { label: 'School location', icon: '📍' },
   { label: 'My Counselor', icon: '👤' },
   { label: 'Sports', icon: '🏆' },
@@ -231,7 +234,7 @@ async function getAIResponse(message) {
     return `Here's what I found on Cedar Cliff's pages:\n\n${formatScrapedSnippets(scraped.slice(0, 4))}`
   }
 
-  return `I don't have a confident answer for that offline. I'm running without my live AI brain right now — the site admin needs to add the \`VITE_GEMINI_API_KEY\` environment variable in Vercel and redeploy so I can search the web for current info.\n\nIn the meantime, I can help with: bell schedule, lunch, sports, counselors, principal, clubs, senior info, contact info, course offerings, and graduation requirements. What are you looking for?`
+  return `I don't have a confident answer for that offline. I'm running without my live AI brain right now — the site admin needs to add the \`GEMINI_API_KEY\` environment variable in Vercel (server-side) and redeploy so I can search the web for current info.\n\nIn the meantime, I can help with: bell schedule, lunch, sports, counselors, principal, clubs, senior info, contact info, course offerings, and graduation requirements. What are you looking for?`
 }
 
 function generateId() {
@@ -241,27 +244,6 @@ function generateId() {
 function titleFromMessage(text) {
   const trimmed = text.slice(0, 30).trim()
   return trimmed.length < text.length ? trimmed + '…' : trimmed
-}
-
-function formatMessageText(text) {
-  return text.split('\n').map((line, i) => {
-    const parts = []
-    const boldRegex = /\*\*(.*?)\*\*/g
-    let lastIndex = 0
-    let match
-    while ((match = boldRegex.exec(line)) !== null) {
-      if (match.index > lastIndex) parts.push(line.slice(lastIndex, match.index))
-      parts.push(<strong key={`${i}-${match.index}`}>{match[1]}</strong>)
-      lastIndex = boldRegex.lastIndex
-    }
-    if (lastIndex < line.length) parts.push(line.slice(lastIndex))
-    return (
-      <span key={i}>
-        {parts.length > 0 ? parts : line}
-        {i < text.split('\n').length - 1 && <br />}
-      </span>
-    )
-  })
 }
 
 function storageKey(uid) {
@@ -317,8 +299,43 @@ function App() {
   const [linkBusy, setLinkBusy] = useState(false)
   const [theme, setTheme] = useState(getInitialTheme)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [aiStatus, setAiStatus] = useState(null)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+
+  // Backend status for the pill (which services are configured; KB size). Public, no secrets.
+  useEffect(() => {
+    if (!isGeminiConfigured()) return
+    let cancelled = false
+    fetchAiStatus().then((s) => {
+      if (!cancelled) setAiStatus(s)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const statusOk = isGeminiConfigured() && (aiStatus === null || Boolean(aiStatus?.services?.llm))
+  const statusLabel = !isGeminiConfigured()
+    ? 'Offline mode'
+    : aiStatus === null
+      ? 'Online'
+      : aiStatus?.services?.llm
+        ? aiStatus?.services?.webSearch
+          ? 'Online · web search'
+          : 'Online'
+        : 'AI not configured'
+  const statusTitle = !isGeminiConfigured()
+    ? 'AI disabled — running in offline mode.'
+    : aiStatus?.services
+      ? [
+          `Model: ${aiStatus.services.llm || 'not configured (set GEMINI_API_KEY on the server)'}`,
+          `Web search: ${aiStatus.services.webSearch || (aiStatus.services.groundingFallback ? 'Gemini grounding fallback' : 'off')}`,
+          `Knowledge base: ${aiStatus.knowledgeBase?.pagesOk ?? 0} pages / ${aiStatus.knowledgeBase?.chunks ?? 0} passages${
+            aiStatus.knowledgeBase?.newestCheck ? ` · last checked ${String(aiStatus.knowledgeBase.newestCheck).slice(0, 10)}` : ''
+          }`,
+        ].join('\n')
+      : 'Live AI with the Cedar Cliff knowledge base and web search.'
 
   const closeSidebar = useCallback(() => setIsSidebarOpen(false), [])
   const toggleSidebar = useCallback(() => setIsSidebarOpen((v) => !v), [])
@@ -394,8 +411,14 @@ function App() {
       // Memory is always scoped to the account that is signed in right now.
       const uid = user?.uid || null
 
+      // Prior turns of this conversation (for continuity on the server).
+      const priorMessages = isNewConversation
+        ? []
+        : (conversations.find((c) => c.id === targetConvoId)?.messages || []).slice(-10)
+
       const runReply = async () => {
         let aiText
+        let aiSources = []
         let handledByMemoryCommand = false
         if (uid) {
           try {
@@ -413,21 +436,26 @@ function App() {
           // nothing else to do
         } else if (isGeminiConfigured()) {
           try {
-            let memoryBlock = ''
+            let memoryFacts = []
             if (uid) {
               try {
-                memoryBlock = await getMemoryPromptBlock(uid)
+                memoryFacts = await loadUserMemory(uid)
               } catch (err) {
                 console.warn('Memory load failed:', err)
               }
             }
-            aiText = await askGemini(trimmed, { memoryBlock })
-            if (uid) {
-              // Learn in the background; never block or break the reply.
-              void rememberFromExchange(uid, trimmed, aiText)
+            const reply = await askGemini(trimmed, {
+              history: priorMessages.map((m) => ({ role: m.role, text: m.text })),
+              memoryFacts,
+            })
+            aiText = reply.text
+            aiSources = reply.sources
+            if (uid && reply.memoryUpdate) {
+              // Persist what the server learned about this user; never block the reply.
+              void applyMemoryUpdate(uid, reply.memoryUpdate)
             }
           } catch (err) {
-            console.error('Gemini error:', err)
+            console.error('Chat error:', err)
             aiText = formatGeminiClientError(err)
           }
         } else {
@@ -439,7 +467,7 @@ function App() {
           }
         }
 
-        const aiMsg = { id: generateId(), role: 'assistant', text: aiText }
+        const aiMsg = { id: generateId(), role: 'assistant', text: aiText, sources: aiSources }
         setConversations((prev) =>
           prev.map((c) =>
             c.id === targetConvoId ? { ...c, messages: [...c.messages, aiMsg] } : c,
@@ -450,7 +478,7 @@ function App() {
 
       void runReply()
     },
-    [activeId, isTyping, user],
+    [activeId, isTyping, user, conversations],
   )
 
   const onLinkPassword = async (e) => {
@@ -580,20 +608,13 @@ function App() {
           </div>
 
           <div className="topbar__actions">
-            <span
-              className="status-pill"
-              title={
-                isGeminiConfigured()
-                  ? 'Live AI + Google Search enabled'
-                  : 'API key not set — running in offline mode. Add VITE_GEMINI_API_KEY in Vercel → redeploy.'
-              }
-            >
+            <span className="status-pill" title={statusTitle}>
               <span
                 className="status-pill__dot"
                 aria-hidden="true"
-                style={{ background: isGeminiConfigured() ? undefined : '#f59e0b' }}
+                style={{ background: statusOk ? undefined : '#f59e0b' }}
               />
-              {isGeminiConfigured() ? 'Online' : 'Offline mode'}
+              {statusLabel}
             </span>
             <button
               className="theme-toggle"
@@ -700,7 +721,8 @@ function App() {
                     />
                   )}
                   <div className="chat-bubble__content">
-                    {formatMessageText(msg.text)}
+                    <MessageText text={msg.text} sources={msg.sources} />
+                    {msg.role === 'assistant' && <MessageSources sources={msg.sources} />}
                   </div>
                 </div>
               ))}

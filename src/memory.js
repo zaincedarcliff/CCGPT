@@ -10,7 +10,6 @@
 
 import { doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from './firebase.js'
-import { extractMemoryFacts, isGeminiConfigured } from './gemini.js'
 
 const COLLECTION = 'userMemory'
 const MAX_FACTS = 40
@@ -133,28 +132,21 @@ export async function handleMemoryCommand(uid, userText) {
   return null
 }
 
-/** Cheap gate so we only pay for an extraction call when the message plausibly
- *  contains something personal. */
-const PERSONAL_HINT_RE =
-  /\b(i am|i'm|im|i was|i will|i'll|i play|i run|i swim|i wrestle|i like|i love|i hate|i prefer|i want|i need|i have|i've|i take|i'm taking|i take|i joined|i'm in|i am in|my name|call me|remember|don't forget|my counselor|my teacher|my grade|my class|my classes|my schedule|my sport|my team|my club|senior|junior|sophomore|freshman|class of)\b/i
-
 /**
- * After an exchange, pull out durable facts and merge them into this account's memory.
+ * Merge a memory update produced by the server (/api/chat returns `memoryUpdate: {add, remove}`
+ * after extracting durable facts from the exchange) into this account's memory.
  * Fire-and-forget safe: never throws.
  * @param {string} uid
- * @param {string} userText
- * @param {string} assistantText
+ * @param {{ add?: string[], remove?: string[] } | null} update
  */
-export async function rememberFromExchange(uid, userText, assistantText) {
-  if (!uid || !isGeminiConfigured()) return
-  const text = String(userText || '').trim()
-  if (text.length < 6 || !PERSONAL_HINT_RE.test(text)) return
+export async function applyMemoryUpdate(uid, update) {
+  if (!uid || !update) return
+  const add = Array.isArray(update.add) ? update.add.map((s) => String(s).trim()).filter(Boolean) : []
+  const remove = Array.isArray(update.remove) ? update.remove.map((s) => String(s).trim()).filter(Boolean) : []
+  if (!add.length && !remove.length) return
 
   try {
     const existing = await loadUserMemory(uid)
-    const { add, remove } = await extractMemoryFacts(text, assistantText, existing)
-    if (!add.length && !remove.length) return
-
     const norm = (s) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
     const removeSet = new Set(remove.map(norm))
     let next = existing.filter((f) => !removeSet.has(norm(f)))

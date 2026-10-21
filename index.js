@@ -1,276 +1,67 @@
-import axios from "axios";
-import * as cheerio from "cheerio";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+// CLI: build / refresh the Cedar Cliff knowledge base from the terminal.
+//
+//   node index.js                 full incremental crawl (no time limit), embeds new chunks, saves index
+//   node index.js --budget=120000 stop fetching after ~2 minutes (leftovers carry over)
+//   node index.js --url=<url>     refresh one page only
+//   node index.js --no-legacy     skip writing public/schoolData.json
+//
+// Storage: Vercel Blob when BLOB_READ_WRITE_TOKEN is set (same store the deployed app reads),
+// otherwise ./.kb/ on disk (what `npm run dev` reads). Reads .env.local automatically.
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-export const urls = [
-  "https://www.wssd.k12.pa.us/cedarcliff.aspx",
-  "https://psweb.wssd.k12.pa.us/public/",
-  "https://sites.google.com/wssd.bz/the-cedar-cliff-colt-online-ne?usp=sharing",
-  "https://sites.google.com/wssd.bz/the-cedar-cliff-colt-online-ne/home/cc-school-news",
-  "https://sites.google.com/wssd.bz/the-cedar-cliff-colt-online-ne/home/cc-community-news",
-  "https://sites.google.com/wssd.bz/the-cedar-cliff-colt-online-ne/home/cc-sports-news",
-  "https://sites.google.com/wssd.bz/the-cedar-cliff-colt-online-ne/home/cc-lifestyle-news",
-  "https://sites.google.com/wssd.bz/the-cedar-cliff-colt-online-ne/home/cc-special-news",
-  "https://www.wssd.k12.pa.us/AboutCedarCliffHighSchool.aspx",
-  "https://www.wssd.k12.pa.us/PrincipalsMessage.aspx",
-  "https://www.wssd.k12.pa.us/monthlynewsletter7606.aspx",
-  "https://www.wssd.k12.pa.us/SuccessStories.aspx",
-  "https://www.wssd.k12.pa.us/DistrictHandbooks.aspx",
-  "https://www.wssd.k12.pa.us/Students.aspx",
-  "https://www.wssd.k12.pa.us/Parents.aspx",
-  "https://www.wssd.k12.pa.us/StudentAttendance.aspx",
-  "https://www.wssd.k12.pa.us/AttendanceInformation.aspx",
-  "https://www.wssd.k12.pa.us/WorkPermits.aspx",
-  "https://www.wssd.k12.pa.us/DailyAnnouncements1.aspx",
-  // NOTE: the "Seniors YYYY" page is year-specific (Seniors2027.aspx, …) and is discovered
-  // automatically from the Cedar Cliff nav in runScrape() — do not hardcode it here.
-  "https://www.wssd.k12.pa.us/CedarCliffGuidance.aspx",
-  "https://www.wssd.k12.pa.us/AthleticsCCHS.aspx",
-  "https://www.wssd.k12.pa.us/Aquaponics.aspx",
-  "https://www.wssd.k12.pa.us/FriendsForever.aspx",
-  "https://www.wssd.k12.pa.us/MrsKamps.aspx",
-  "https://sites.google.com/wssd.bz/cchs-honors-ap-college",
-  "https://www.wssd.k12.pa.us/KeyClub.aspx",
-  "https://www.wssd.k12.pa.us/CedarCliffJROTC.aspx",
-  "https://www.cedarcliffproductions.com/",
-  "https://www.wssd.k12.pa.us/CedarCliffYearbook.aspx",
-  "https://www.wssd.k12.pa.us/HighSchoolBellSchedule.aspx",
-  "https://www.wssd.k12.pa.us/CedarCliffNHS.aspx",
-  "https://www.wssd.k12.pa.us/ActivityFee.aspx",
-  "https://www.wssd.k12.pa.us/AthleticForms.aspx",
-  "https://www.wssd.k12.pa.us/DirectionstoAreaSchools.aspx",
-  "https://www.wssd.k12.pa.us/InterscholasticAthleticDisclosureForms.aspx",
-  "https://www.wssd.k12.pa.us/WestShoreNatatorium.aspx",
-  "https://www.wssd.k12.pa.us/WestShoreStadiumBagPolicy.aspx",
-  "https://www.wssd.k12.pa.us/Athletics.aspx",
-  "https://www.arbiterlive.com/Teams?entityId=3551",
-  "https://www.wssd.k12.pa.us/Monthlye-News.aspx",
-  "https://www.wssd.k12.pa.us/FoodServices.aspx",
-  "https://www.wssd.k12.pa.us/Menus.aspx",
-  "https://www.wssd.k12.pa.us/FreeandReducedMeals.aspx",
-  "https://www.wssd.k12.pa.us/StudentMealAccounts.aspx",
-  "https://www.wssd.k12.pa.us/WellnessPolicyNutritionalStandards.aspx",
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-  // Academic policies / scheduling (General Information + Important Dates)
-  "https://www.wssd.k12.pa.us/CourseSequencingCredits.aspx",
-  "https://www.wssd.k12.pa.us/CreditRequirements.aspx",
-  "https://www.wssd.k12.pa.us/AcademicContract.aspx",
-  "https://www.wssd.k12.pa.us/AdvancedPlacementCourses.aspx",
-  "https://www.wssd.k12.pa.us/EarlyAdmissions.aspx",
-  "https://www.wssd.k12.pa.us/EarlyGraduation.aspx",
-  "https://www.wssd.k12.pa.us/Make-UpofFailures.aspx",
-  "https://www.wssd.k12.pa.us/ScheduleChanges.aspx",
-  "https://www.wssd.k12.pa.us/SeniorOption.aspx",
-  "https://www.wssd.k12.pa.us/StudyingAbroad.aspx",
-  "https://www.wssd.k12.pa.us/TeenParentingDayCareProgram.aspx",
-  "https://www.wssd.k12.pa.us/WeightedGrades.aspx",
-
-  // Course offerings & descriptions (by department)
-  "https://www.wssd.k12.pa.us/Art.aspx",
-  "https://www.wssd.k12.pa.us/BusinessandMarketing.aspx",
-  "https://www.wssd.k12.pa.us/ComputerScience.aspx",
-  "https://www.wssd.k12.pa.us/EngineeringandTechnology.aspx",
-  "https://www.wssd.k12.pa.us/English.aspx",
-  "https://www.wssd.k12.pa.us/EnglishLanguageDev.aspx",
-  "https://www.wssd.k12.pa.us/HealthPhysicalEd.aspx",
-  "https://www.wssd.k12.pa.us/JuniorReserveOfficersTrainingCorpsJROTC.aspx",
-  "https://www.wssd.k12.pa.us/Library.aspx",
-  "https://www.wssd.k12.pa.us/Mathematics.aspx",
-  "https://www.wssd.k12.pa.us/Music.aspx",
-  "https://www.wssd.k12.pa.us/Science.aspx",
-  "https://www.wssd.k12.pa.us/SocialStudies.aspx",
-  "https://www.wssd.k12.pa.us/SpecialEducation.aspx",
-  "https://www.wssd.k12.pa.us/WorldLanguages.aspx",
-  "https://www.wssd.k12.pa.us/CooperativeEducation.aspx",
-  "https://www.wssd.k12.pa.us/DualEnrollment.aspx",
-  "https://www.wssd.k12.pa.us/PathwayInternships.aspx",
-
-  // MaxPreps - Cedar Cliff Colts (sports schedules / scores / rosters)
-  // Boys / Co-ed varsity
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/baseball/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/cross-country/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/football/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/golf/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/lacrosse/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/soccer/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/tennis/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/track-field/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/volleyball/boys/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/wrestling/",
-
-  // Girls varsity
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/girls/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/field-hockey/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/golf/girls/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/lacrosse/girls/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/soccer/girls/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/softball/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/tennis/girls/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/track-field/girls/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/volleyball/",
-
-  // JV
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/baseball/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/football/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/lacrosse/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/soccer/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/volleyball/boys/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/girls/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/field-hockey/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/lacrosse/girls/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/soccer/girls/jv/spring/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/softball/jv/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/volleyball/jv/",
-
-  // Freshman
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/freshman/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/football/freshman/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/basketball/girls/freshman/",
-  "https://www.maxpreps.com/pa/camp-hill/cedar-cliff-colts/field-hockey/freshman/",
-];
-
-const REQUEST_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept:
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Accept-Encoding": "gzip, deflate, br",
-  "Upgrade-Insecure-Requests": "1",
-};
-
-const MIN_LINE_LENGTH = 40;
-
-/** Cloudflare "email-protection" obfuscates addresses; decode them so the text keeps the real email. */
-function decodeCloudflareEmail(encoded) {
-  const key = parseInt(encoded.slice(0, 2), 16);
-  let out = "";
-  for (let i = 2; i < encoded.length; i += 2) {
-    out += String.fromCharCode(parseInt(encoded.slice(i, i + 2), 16) ^ key);
-  }
-  return out;
-}
-
-function unprotectEmails($) {
-  $("[data-cfemail]").each((_i, el) => {
-    const encoded = $(el).attr("data-cfemail");
-    if (encoded) $(el).replaceWith(decodeCloudflareEmail(encoded));
-  });
-  $('a[href^="/cdn-cgi/l/email-protection#"]').each((_i, el) => {
-    const hash = ($(el).attr("href") || "").split("#")[1];
-    if (hash && !/@/.test($(el).text())) $(el).text(decodeCloudflareEmail(hash));
-  });
-}
-
-/**
- * The WSSD CMS renders page bodies inside `span[id$="_lblText"]` as loose `<div>`/`<br>` lines
- * (not <p>/<li>), so a tag-based selector misses the main content (counselor list, senior info…).
- * Split those blocks on block-level boundaries and keep each line.
- */
-function extractCmsContentLines($) {
-  const lines = [];
-  $('span[id$="_lblText"], .component_container').each((_i, block) => {
-    const html = $(block).html() || "";
-    const withBreaks = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(div|p|li|tr|h[1-6])>/gi, "$&\n");
-    const text = cheerio.load(`<div>${withBreaks}</div>`)("div").first().text();
-    for (const raw of text.split("\n")) {
-      const line = raw.replace(/\s+/g, " ").trim();
-      if (line.length > MIN_LINE_LENGTH) lines.push(line);
-    }
-  });
-  return lines;
-}
-
-/** The district site returns HTTP 200 for missing pages; detect them so stale URLs aren't stored as content. */
-function isErrorPage($) {
-  const title = $("title").text().trim();
-  return /an error has occurred|page not found/i.test(title);
-}
-
-export async function scrapeUrl(url) {
-  const { data } = await axios.get(url, { timeout: 20000, headers: REQUEST_HEADERS });
-  const $ = cheerio.load(data);
-  if (isErrorPage($)) {
-    throw new Error(`site returned an error page (${$("title").text().trim()})`);
-  }
-  unprotectEmails($);
-  $("script, style, noscript").remove();
-
-  const seen = new Set();
-  const pageText = [];
-  const push = (text) => {
-    const line = text.replace(/\s+/g, " ").trim();
-    if (line.length > MIN_LINE_LENGTH && !seen.has(line)) {
-      seen.add(line);
-      pageText.push(line);
-    }
-  };
-  $("h1, h2, h3, p, li, td, th").each((_i, el) => push($(el).text()));
-  for (const line of extractCmsContentLines($)) push(line);
-
-  return {
-    source: url,
-    scrapedAt: new Date().toISOString(),
-    content: pageText,
-  };
-}
-
-/**
- * Find year-specific pages linked from the Cedar Cliff nav (e.g. "Seniors 2027" → Seniors2027.aspx)
- * so the URL list never points at last year's page.
- */
-export async function discoverYearPages() {
+for (const f of ['.env.local', '.env']) {
   try {
-    const { data } = await axios.get("https://www.wssd.k12.pa.us/cedarcliff.aspx", {
-      timeout: 20000,
-      headers: REQUEST_HEADERS,
-    });
-    const $ = cheerio.load(data);
-    const found = new Set();
-    $("a[href]").each((_i, a) => {
-      const href = $(a).attr("href") || "";
-      const m = href.match(/\/?(Seniors\d{4}\.aspx)$/i);
-      if (m) found.add(`https://www.wssd.k12.pa.us/${m[1]}`);
-    });
-    return [...found];
-  } catch (err) {
-    console.log(`Failed to discover year-specific pages — ${err.message}`);
-    return [];
+    process.loadEnvFile(path.join(__dirname, f))
+  } catch {
+    /* optional */
   }
 }
 
-export async function runScrape() {
-  const allData = [];
-  const yearPages = await discoverYearPages();
-  const targets = [...urls];
-  for (const u of yearPages) if (!targets.includes(u)) targets.push(u);
-  for (const url of targets) {
-    try {
-      const entry = await scrapeUrl(url);
-      allData.push(entry);
-      console.log(`Scraped: ${url}`);
-    } catch (err) {
-      console.log(`Failed: ${url} — ${err.message}`);
-    }
+const { runCrawl, toLegacySchoolData } = await import('./lib/crawler.js')
+const { storageKind } = await import('./lib/storage.js')
+const { SEED_URLS } = await import('./lib/seeds.js')
+const { normalizeUrl } = await import('./lib/sources.js')
+
+/** Backwards-compatible export of the seed URL list. */
+export const urls = SEED_URLS
+
+function arg(name, fallback) {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
+  return hit ? hit.slice(name.length + 3) : fallback
+}
+
+async function main() {
+  const budget = Number(arg('budget', '')) || Infinity
+  const urls = process.argv.filter((a) => a.startsWith('--url=')).map((a) => a.slice('--url='.length)).filter(Boolean)
+  const writeLegacy = !process.argv.includes('--no-legacy')
+
+  console.log(`CCGPT knowledge base build → storage: ${storageKind()}`)
+  console.log(`GEMINI_API_KEY: ${process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY ? 'set (embeddings on)' : 'missing (keyword search only)'}`)
+
+  const { index, summary } = await runCrawl({
+    budgetMs: budget,
+    onlyUrls: urls.length ? urls.map((u) => normalizeUrl(u) || u) : undefined,
+    maxPages: Number(arg('max-pages', '')) || undefined,
+  })
+
+  if (writeLegacy) {
+    const data = toLegacySchoolData(index)
+    const outPath = path.join(__dirname, 'public', 'schoolData.json')
+    fs.writeFileSync(outPath, JSON.stringify(data, null, 2))
+    console.log(`Wrote legacy ${outPath} (${data.length} sources)`)
   }
-  return allData;
+  console.log('Summary:', summary)
 }
 
-async function updateAllData() {
-  const allData = await runScrape();
-  const outPath = path.join(__dirname, "public", "schoolData.json");
-  fs.writeFileSync(outPath, JSON.stringify(allData, null, 2));
-  console.log(`\u2705 Data updated! Wrote ${outPath}`);
-}
-
-const isDirectRun =
-  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (isDirectRun) {
-  updateAllData();
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
 }

@@ -26,4 +26,14 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  // Server-side code (Vercel functions, crawler, CLI) runs in Node.
+  {
+    files: ['api/**/*.js', 'lib/**/*.js', 'scripts/**/*.js', 'index.js', 'vite.config.js'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])

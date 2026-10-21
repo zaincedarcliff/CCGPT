@@ -47,7 +47,7 @@ export async function loadSchoolData() {
   return schoolDataCache
 }
 
-/** Keyword → source-URL matcher. A user question that contains any keyword
+/** Keyword â†’ source-URL matcher. A user question that contains any keyword
  *  pulls in the first entry whose `source` URL matches.  */
 export const TOPIC_RULES = [
   {
@@ -310,7 +310,7 @@ const DAY_DATE = /(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),\
 function cleanLine(text) {
   let s = String(text || '').replace(/\s+/g, ' ').trim()
 
-  // MaxPreps often emits: "<Title><Day>, <Mon> <d>, <YYYY><Title>..." — keep just the title.
+  // MaxPreps often emits: "<Title><Day>, <Mon> <d>, <YYYY><Title>..." â€” keep just the title.
   const repeatedTitle = s.match(
     new RegExp(`^(.+?)${DAY_DATE.source}\\1`),
   )
@@ -318,10 +318,10 @@ function cleanLine(text) {
     s = repeatedTitle[1].trim()
   }
 
-  // "Game Results<date>On <date>..." → drop the duplicated prefix.
+  // "Game Results<date>On <date>..." â†’ drop the duplicated prefix.
   s = s.replace(new RegExp(`^Game Results${DAY_DATE.source}`), '').trim()
 
-  // "<Season> Cedar Cliff Colts ... Season<date>Welcome ..." → keep from "Welcome".
+  // "<Season> Cedar Cliff Colts ... Season<date>Welcome ..." â†’ keep from "Welcome".
   s = s.replace(new RegExp(`^[A-Z][a-z]+\\s+Cedar Cliff[^]*?Season${DAY_DATE.source}`), '').trim()
 
   // Trailing "Cedar Cliff<score>Opponent<score>FinalBox Score" noise after a real sentence.
@@ -331,9 +331,9 @@ function cleanLine(text) {
   s = s.replace(/\s*Tournament Game\d{4}[^.]*Championship[^.]*$/i, '').trim()
 
   // Trailing byline + "Read Article" / "Team Reports" noise.
-  s = s.replace(/\s*(Team Reports[•\s]+[A-Z][a-z]+\s+\d+,\s+\d{4}.*)$/i, '').trim()
+  s = s.replace(/\s*(Team Reports[â€¢\s]+[A-Z][a-z]+\s+\d+,\s+\d{4}.*)$/i, '').trim()
   s = s.replace(/\s*(Read Article.*)$/i, '').trim()
-  s = s.replace(/\s*[A-Z][a-z]+\s+[A-Z][a-z]+•[A-Z][a-z]+\s+\d+,\s+\d{4}.*$/, '').trim()
+  s = s.replace(/\s*[A-Z][a-z]+\s+[A-Z][a-z]+â€¢[A-Z][a-z]+\s+\d+,\s+\d{4}.*$/, '').trim()
 
   return s
 }
@@ -344,7 +344,7 @@ function cleanLine(text) {
 export function extractRelevantSnippets(question, allData, opts = {}) {
   const { maxSnippets = 6, maxCharsPerSnippet = 320 } = opts
   let entries = getRelevantEntries(question, allData)
-  /** No topic keyword matched — still search course/policy pages by question words. */
+  /** No topic keyword matched â€” still search course/policy pages by question words. */
   const fallbackMode = entries.length === 0
   if (fallbackMode) {
     entries = getFallbackCurriculumEntries(allData)
@@ -395,7 +395,7 @@ export function extractRelevantSnippets(question, allData, opts = {}) {
       }
 
       if (fallbackMode) {
-        /** In fallback (no topic match), a single generic word hit is not enough —
+        /** In fallback (no topic match), a single generic word hit is not enough â€”
          *  the question doesn't clearly map to any scraped topic, so we require
          *  multiple query words to line up before we'll quote a line. This stops
          *  noise like "how many students" from pulling a pile of course descriptions
@@ -411,7 +411,7 @@ export function extractRelevantSnippets(question, allData, opts = {}) {
         : domainHits * 10 + genericHits
       const trimmed =
         line.length > maxCharsPerSnippet
-          ? line.slice(0, maxCharsPerSnippet - 1).trimEnd() + '…'
+          ? line.slice(0, maxCharsPerSnippet - 1).trimEnd() + 'â€¦'
           : line
       ranked.push({ line: trimmed, score, source: entry.source })
     }
@@ -496,7 +496,7 @@ export function extractAPCourses(allData) {
   return [...found.values()].sort((a, b) => a.localeCompare(b))
 }
 
-/** Map of course-catalog source URLs → human-friendly department names. */
+/** Map of course-catalog source URLs â†’ human-friendly department names. */
 export const COURSE_DEPARTMENTS = [
   { match: 'Art.aspx', name: 'Art' },
   { match: 'BusinessandMarketing', name: 'Business & Marketing' },
@@ -630,7 +630,7 @@ export function extractCourses(allData) {
   const results = []
   if (!allData || allData.length === 0) return results
 
-  const nextCourseRe = /[A-Z][A-Z0-9 \-&',/:()\.]{2,90}?\d{6,}(?:\s*\.?\s*\d+)?\s*Credits?\b/
+  const nextCourseRe = /[A-Z][A-Z0-9 \-&',/:().]{2,90}?\d{6,}(?:\s*\.?\s*\d+)?\s*Credits?\b/
 
   for (const entry of allData) {
     const dept = departmentForSource(entry.source)
@@ -638,7 +638,7 @@ export function extractCourses(allData) {
     const content = entry.content || []
     for (let i = 0; i < content.length; i++) {
       const rawLine = String(content[i]).replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, ' ')
-      const courseRe = /([A-Z][A-Z0-9 \-&',/:()\.]{2,90}?)(\d{6,})(?:\s*\.?\s*\d+)?\s*Credits?\b/g
+      const courseRe = /([A-Z][A-Z0-9 \-&',/:().]{2,90}?)(\d{6,})(?:\s*\.?\s*\d+)?\s*Credits?\b/g
       let m
       while ((m = courseRe.exec(rawLine)) !== null) {
         let title = m[1].replace(/\s+/g, ' ').trim()
@@ -646,8 +646,8 @@ export function extractCourses(allData) {
         if (/\bLEVEL$/.test(title) && /^\d/.test(m[2])) {
           title = `${title} ${m[2].slice(0, 1)}`
         }
-        title = title.replace(/[\s\-–:,]+$/, '').trim()
-        title = title.replace(/\s+\-\s+$/, '').trim()
+        title = title.replace(/[\s\-â€“:,]+$/, '').trim()
+        title = title.replace(/\s+-\s+$/, '').trim()
 
         if (title.length < 4) continue
         if (/^LEVEL\b/.test(title)) continue
@@ -845,7 +845,7 @@ const GAME_LINE_PATTERNS = [
   /^On\s+(Sun|Mon|Tues|Wednes|Thurs|Fri|Satur)day,\s+[A-Z][a-z]+\s+\d+,\s+\d{4}/,
   /\b(Recap|Preview|Highlights?)\b/i,
   /\b(Takes? a Loss|Takes? the Win|Beats?|Defeats?|Falls to|Wins?|Extends?|Ends?\s+.*Streak)\b/i,
-  /\b\d+\s*[-–]\s*\d+\b/,
+  /\b\d+\s*[-â€“]\s*\d+\b/,
 ]
 
 /** Guaranteed fallback: when the keyword-ranked path returns nothing, still
@@ -876,7 +876,7 @@ export function extractLatestForSport(sport, allData, opts = {}) {
 
       const trimmed =
         line.length > maxCharsPerSnippet
-          ? line.slice(0, maxCharsPerSnippet - 1).trimEnd() + '…'
+          ? line.slice(0, maxCharsPerSnippet - 1).trimEnd() + 'â€¦'
           : line
       out.push({ line: trimmed, source: entry.source })
       if (out.length >= maxSnippets) return out

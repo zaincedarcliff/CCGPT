@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+
+# Local knowledge-base index (built by `npm run kb:build`; production uses Vercel Blob)
+.kb
 
 # Editor directories and files
 .cursor
