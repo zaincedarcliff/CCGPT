@@ -16,6 +16,9 @@ dist-ssr
 # Local knowledge-base index (built by `npm run kb:build`; production uses Vercel Blob)
 .kb
 
+# Vercel CLI project link (machine-local)
+.vercel
+
 # Editor directories and files
 .cursor
 .vscode/*
